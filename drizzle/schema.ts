@@ -1,17 +1,8 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { bigint, index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
-/**
- * Core user table backing auth flow.
- * Extend this file with additional tables as your product grows.
- * Columns use camelCase to match both database fields and generated types.
- */
+/** Core user table backing Manus OAuth. */
 export const users = mysqlTable("users", {
-  /**
-   * Surrogate primary key. Auto-incremented numeric value managed by the database.
-   * Use this for relations between tables.
-   */
   id: int("id").autoincrement().primaryKey(),
-  /** Manus OAuth identifier (openId) returned from the OAuth callback. Unique per user. */
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
@@ -22,7 +13,69 @@ export const users = mysqlTable("users", {
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
+export const employees = mysqlTable(
+  "employees",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    employeeCode: varchar("employeeCode", { length: 32 }).notNull().unique(),
+    fullName: varchar("fullName", { length: 160 }).notNull(),
+    department: varchar("department", { length: 120 }).notNull(),
+    position: varchar("position", { length: 120 }).notNull(),
+    workStartMin: int("workStartMin").default(540).notNull(),
+    workEndMin: int("workEndMin").default(1080).notNull(),
+    status: mysqlEnum("status", ["active", "inactive"]).default("active").notNull(),
+    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
+    updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
+  },
+  (table) => ({
+    departmentIdx: index("employees_department_idx").on(table.department),
+    statusIdx: index("employees_status_idx").on(table.status),
+  }),
+);
+
+export const attendance = mysqlTable(
+  "attendance",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    employeeId: int("employeeId").notNull(),
+    workDate: varchar("workDate", { length: 10 }).notNull(),
+    checkInAt: bigint("checkInAt", { mode: "number" }),
+    checkOutAt: bigint("checkOutAt", { mode: "number" }),
+    lateMinutes: int("lateMinutes").default(0).notNull(),
+    note: text("note"),
+    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
+    updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
+  },
+  (table) => ({
+    employeeDateIdx: index("attendance_employee_date_idx").on(table.employeeId, table.workDate),
+    dateIdx: index("attendance_date_idx").on(table.workDate),
+  }),
+);
+
+export const leaveRequests = mysqlTable(
+  "leaveRequests",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    employeeId: int("employeeId").notNull(),
+    leaveType: mysqlEnum("leaveType", ["annual", "sick", "personal", "other"]).notNull(),
+    startDate: varchar("startDate", { length: 10 }).notNull(),
+    endDate: varchar("endDate", { length: 10 }).notNull(),
+    totalDays: int("totalDays").notNull(),
+    reason: text("reason"),
+    status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
+    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
+    updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
+  },
+  (table) => ({
+    employeeIdx: index("leave_employee_idx").on(table.employeeId),
+    statusIdx: index("leave_status_idx").on(table.status),
+    dateIdx: index("leave_date_idx").on(table.startDate, table.endDate),
+  }),
+);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
-
-// TODO: Add your tables here
+export type Employee = typeof employees.$inferSelect;
+export type InsertEmployee = typeof employees.$inferInsert;
+export type Attendance = typeof attendance.$inferSelect;
+export type LeaveRequest = typeof leaveRequests.$inferSelect;
