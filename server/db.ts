@@ -127,7 +127,7 @@ export async function createEmployee(input: {
   const now = Date.now();
   const result = await db
     .insert(employees)
-    .values({ ...input, workStartMin: input.workStartMin ?? 540, workEndMin: input.workEndMin ?? 1080, createdAt: now, updatedAt: now })
+    .values({ ...input, workStartMin: input.workStartMin ?? 510, workEndMin: input.workEndMin ?? 1050, createdAt: now, updatedAt: now })
     .$returningId();
   return result[0];
 }
@@ -157,6 +157,9 @@ export async function getAttendanceByDate(workDate: string, userId?: number) {
       checkInAt: attendance.checkInAt,
       checkOutAt: attendance.checkOutAt,
       lateMinutes: attendance.lateMinutes,
+      checkInMode: attendance.checkInMode,
+      latitude: attendance.latitude,
+      longitude: attendance.longitude,
       note: attendance.note,
     })
     .from(attendance)
@@ -178,11 +181,14 @@ export async function getRecentAttendance(limit = 8, userId?: number) {
       checkInAt: attendance.checkInAt,
       checkOutAt: attendance.checkOutAt,
       lateMinutes: attendance.lateMinutes,
+      checkInMode: attendance.checkInMode,
+      latitude: attendance.latitude,
+      longitude: attendance.longitude,
     })
     .from(attendance)
     .innerJoin(employees, eq(attendance.employeeId, employees.id))
-    .orderBy(desc(attendance.updatedAt))
     .where(userId === undefined ? undefined : eq(employees.userId, userId))
+    .orderBy(desc(attendance.updatedAt))
     .limit(limit);
 }
 
@@ -248,7 +254,12 @@ export async function getDashboardSummary(monthPrefix: string, userId?: number) 
   };
 }
 
-export async function checkInEmployee(employeeId: number, workDate: string, timestamp: number, note?: string) {
+export async function checkInEmployee(
+  employeeId: number,
+  workDate: string,
+  timestamp: number,
+  input: { checkInMode: "office" | "offsite"; latitude: number; longitude: number; note?: string },
+) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   const employee = await db.select().from(employees).where(eq(employees.id, employeeId)).limit(1);
@@ -265,12 +276,12 @@ export async function checkInEmployee(employeeId: number, workDate: string, time
   if (existing[0]) {
     await db
       .update(attendance)
-      .set({ checkInAt: timestamp, lateMinutes, note: note ?? existing[0].note, updatedAt: now })
+      .set({ checkInAt: timestamp, lateMinutes, checkInMode: input.checkInMode, latitude: input.latitude, longitude: input.longitude, note: input.note ?? existing[0].note, updatedAt: now })
       .where(eq(attendance.id, existing[0].id));
     return { id: existing[0].id, lateMinutes };
   }
 
-  const result = await db.insert(attendance).values({ employeeId, workDate, checkInAt: timestamp, lateMinutes, note, createdAt: now, updatedAt: now }).$returningId();
+  const result = await db.insert(attendance).values({ employeeId, workDate, checkInAt: timestamp, lateMinutes, ...input, createdAt: now, updatedAt: now }).$returningId();
   return { id: result[0]?.id, lateMinutes };
 }
 

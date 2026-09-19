@@ -1,4 +1,4 @@
-import { bigint, index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { bigint, double, index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
 /** Core user table backing Manus OAuth. */
 export const users = mysqlTable("users", {
@@ -24,8 +24,8 @@ export const employees = mysqlTable(
     fullName: varchar("fullName", { length: 160 }).notNull(),
     department: varchar("department", { length: 120 }).notNull(),
     position: varchar("position", { length: 120 }).notNull(),
-    workStartMin: int("workStartMin").default(540).notNull(),
-    workEndMin: int("workEndMin").default(1080).notNull(),
+    workStartMin: int("workStartMin").default(510).notNull(),
+    workEndMin: int("workEndMin").default(1050).notNull(),
     status: mysqlEnum("status", ["active", "inactive"]).default("active").notNull(),
     createdAt: bigint("createdAt", { mode: "number" }).notNull(),
     updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
@@ -46,6 +46,9 @@ export const attendance = mysqlTable(
     checkInAt: bigint("checkInAt", { mode: "number" }),
     checkOutAt: bigint("checkOutAt", { mode: "number" }),
     lateMinutes: int("lateMinutes").default(0).notNull(),
+    checkInMode: mysqlEnum("checkInMode", ["office", "offsite"]).default("office").notNull(),
+    latitude: double("latitude"),
+    longitude: double("longitude"),
     note: text("note"),
     createdAt: bigint("createdAt", { mode: "number" }).notNull(),
     updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),

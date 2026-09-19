@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { isValidCoordinate, isWithinOfficeGeofence, OFFICE_LOCATION } from "./location.logic";
 import {
   checkInEmployee,
   checkOutEmployee,
@@ -108,10 +109,21 @@ export const appRouter = router({
     recent: staffProcedure.query(({ ctx }) => getRecentAttendance(8, ctx.user.role === "employee" ? ctx.user.id : undefined)),
     byDate: staffProcedure.input(z.object({ workDate: dateString })).query(({ input, ctx }) => getAttendanceByDate(input.workDate, ctx.user.role === "employee" ? ctx.user.id : undefined)),
     checkIn: staffProcedure
-      .input(z.object({ employeeId: z.number().int().positive(), workDate: dateString, timestamp: z.number().int(), note: z.string().max(500).optional() }))
+      .input(z.object({ employeeId: z.number().int().positive(), workDate: dateString, timestamp: z.number().int(), checkInMode: z.enum(["office", "offsite"]), latitude: z.number().finite(), longitude: z.number().finite(), note: z.string().max(500).optional() }))
       .mutation(async ({ input, ctx }) => {
         await assertEmployeeAccess(input.employeeId, ctx.user.id, ctx.user.role);
-        return checkInEmployee(input.employeeId, input.workDate, input.timestamp, input.note);
+        if (!isValidCoordinate(input.latitude, input.longitude)) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "ไม่พบพิกัด GPS ที่ถูกต้อง กรุณาอนุญาตการเข้าถึงตำแหน่ง" });
+        }
+        if (input.checkInMode === "office") {
+          const geofence = isWithinOfficeGeofence(input.latitude, input.longitude);
+          if (!geofence.allowed) {
+            throw new TRPCError({ code: "FORBIDDEN", message: `อยู่นอกพื้นที่เช็คอินสำนักงาน (ห่างประมาณ ${Math.round(geofence.distanceMeters)} เมตร / รัศมี ${OFFICE_LOCATION.radiusMeters} เมตร)` });
+          }
+        } else if (!input.note?.trim()) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "กรุณาระบุเหตุผลเมื่อเลือกทำงานต่างจังหวัด" });
+        }
+        return checkInEmployee(input.employeeId, input.workDate, input.timestamp, { checkInMode: input.checkInMode, latitude: input.latitude, longitude: input.longitude, note: input.note?.trim() || undefined });
       }),
     checkOut: staffProcedure
       .input(z.object({ employeeId: z.number().int().positive(), workDate: dateString, timestamp: z.number().int() }))
