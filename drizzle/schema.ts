@@ -7,7 +7,8 @@ export const users = mysqlTable("users", {
   name: text("name"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
-  role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  /** Legacy "user" values are treated as employee by the authorization layer. */
+  role: mysqlEnum("role", ["user", "admin", "hr", "employee"]).default("employee").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -17,6 +18,8 @@ export const employees = mysqlTable(
   "employees",
   {
     id: int("id").autoincrement().primaryKey(),
+    /** Optional link to the employee's authenticated Manus account. */
+    userId: int("userId"),
     employeeCode: varchar("employeeCode", { length: 32 }).notNull().unique(),
     fullName: varchar("fullName", { length: 160 }).notNull(),
     department: varchar("department", { length: 120 }).notNull(),
@@ -28,6 +31,7 @@ export const employees = mysqlTable(
     updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
   },
   (table) => ({
+    userIdx: index("employees_user_idx").on(table.userId),
     departmentIdx: index("employees_department_idx").on(table.department),
     statusIdx: index("employees_status_idx").on(table.status),
   }),

@@ -15,6 +15,13 @@
       "when": 1789789854785,
       "tag": "0001_plain_nebula",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1789790768290,
+      "tag": "0002_motionless_tyger_tiger",
+      "breakpoints": true
     }
   ]
 }

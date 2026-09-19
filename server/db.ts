@@ -71,10 +71,46 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-export async function getEmployees() {
+type AppRole = "admin" | "hr" | "employee";
+
+export async function getUsers() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(employees).orderBy(employees.status, employees.fullName);
+  return db
+    .select({ id: users.id, name: users.name, email: users.email, role: users.role, lastSignedIn: users.lastSignedIn })
+    .from(users)
+    .orderBy(users.name);
+}
+
+export async function getUserById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return result[0];
+}
+
+export async function updateUserRole(id: number, role: AppRole) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(users).set({ role, updatedAt: new Date() }).where(eq(users.id, id));
+  return { id, role };
+}
+
+export async function getEmployees(userId?: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(employees)
+    .where(userId === undefined ? undefined : eq(employees.userId, userId))
+    .orderBy(employees.status, employees.fullName);
+}
+
+export async function getEmployeeByUserId(userId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(employees).where(eq(employees.userId, userId)).limit(1);
+  return result[0];
 }
 
 export async function createEmployee(input: {
@@ -84,6 +120,7 @@ export async function createEmployee(input: {
   position: string;
   workStartMin?: number;
   workEndMin?: number;
+  userId?: number;
 }) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -95,7 +132,18 @@ export async function createEmployee(input: {
   return result[0];
 }
 
-export async function getAttendanceByDate(workDate: string) {
+export async function linkEmployeeUser(employeeId: number, userId: number | null) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(employees).set({ userId, updatedAt: Date.now() }).where(eq(employees.id, employeeId));
+  return { employeeId, userId };
+}
+
+function scopedCondition(condition: ReturnType<typeof eq>, userId?: number) {
+  return userId === undefined ? condition : and(condition, eq(employees.userId, userId));
+}
+
+export async function getAttendanceByDate(workDate: string, userId?: number) {
   const db = await getDb();
   if (!db) return [];
   return db
@@ -113,11 +161,11 @@ export async function getAttendanceByDate(workDate: string) {
     })
     .from(attendance)
     .innerJoin(employees, eq(attendance.employeeId, employees.id))
-    .where(eq(attendance.workDate, workDate))
+    .where(scopedCondition(eq(attendance.workDate, workDate), userId))
     .orderBy(desc(attendance.checkInAt));
 }
 
-export async function getRecentAttendance(limit = 8) {
+export async function getRecentAttendance(limit = 8, userId?: number) {
   const db = await getDb();
   if (!db) return [];
   return db
@@ -134,10 +182,11 @@ export async function getRecentAttendance(limit = 8) {
     .from(attendance)
     .innerJoin(employees, eq(attendance.employeeId, employees.id))
     .orderBy(desc(attendance.updatedAt))
+    .where(userId === undefined ? undefined : eq(employees.userId, userId))
     .limit(limit);
 }
 
-export async function getLeaveRequests(limit = 8) {
+export async function getLeaveRequests(limit = 8, userId?: number) {
   const db = await getDb();
   if (!db) return [];
   return db
@@ -157,30 +206,37 @@ export async function getLeaveRequests(limit = 8) {
     })
     .from(leaveRequests)
     .innerJoin(employees, eq(leaveRequests.employeeId, employees.id))
+    .where(userId === undefined ? undefined : eq(employees.userId, userId))
     .orderBy(desc(leaveRequests.createdAt))
     .limit(limit);
 }
 
-export async function getDashboardSummary(monthPrefix: string) {
+export async function getDashboardSummary(monthPrefix: string, userId?: number) {
   const db = await getDb();
   if (!db) {
     return { totalEmployees: 0, presentDays: 0, lateDays: 0, approvedLeaveDays: 0, pendingLeaves: 0 };
   }
 
   const [employeeRows, attendanceRows, leaveRows, pendingRows] = await Promise.all([
-    db.select({ value: sql<number>`count(*)` }).from(employees).where(eq(employees.status, "active")),
+    db.select({ value: sql<number>`count(*)` }).from(employees).where(userId === undefined ? eq(employees.status, "active") : and(eq(employees.status, "active"), eq(employees.userId, userId))),
     db
       .select({
         present: sql<number>`count(*)`,
         late: sql<number>`coalesce(sum(case when ${attendance.lateMinutes} > 0 then 1 else 0 end), 0)`,
       })
       .from(attendance)
-      .where(like(attendance.workDate, `${monthPrefix}%`)),
+      .innerJoin(employees, eq(attendance.employeeId, employees.id))
+      .where(userId === undefined ? like(attendance.workDate, `${monthPrefix}%`) : and(like(attendance.workDate, `${monthPrefix}%`), eq(employees.userId, userId))),
     db
       .select({ value: sql<number>`coalesce(sum(${leaveRequests.totalDays}), 0)` })
       .from(leaveRequests)
-      .where(and(like(leaveRequests.startDate, `${monthPrefix}%`), eq(leaveRequests.status, "approved"))),
-    db.select({ value: sql<number>`count(*)` }).from(leaveRequests).where(eq(leaveRequests.status, "pending")),
+      .innerJoin(employees, eq(leaveRequests.employeeId, employees.id))
+      .where(userId === undefined ? and(like(leaveRequests.startDate, `${monthPrefix}%`), eq(leaveRequests.status, "approved")) : and(like(leaveRequests.startDate, `${monthPrefix}%`), eq(leaveRequests.status, "approved"), eq(employees.userId, userId))),
+    db
+      .select({ value: sql<number>`count(*)` })
+      .from(leaveRequests)
+      .innerJoin(employees, eq(leaveRequests.employeeId, employees.id))
+      .where(userId === undefined ? eq(leaveRequests.status, "pending") : and(eq(leaveRequests.status, "pending"), eq(employees.userId, userId))),
   ]);
 
   return {
