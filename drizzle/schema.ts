@@ -7,7 +7,6 @@ export const users = mysqlTable("users", {
   name: text("name"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
-  /** Legacy "user" values are treated as employee by the authorization layer. */
   role: mysqlEnum("role", ["user", "admin", "hr", "employee"]).default("employee").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -18,8 +17,9 @@ export const employees = mysqlTable(
   "employees",
   {
     id: int("id").autoincrement().primaryKey(),
-    /** Optional link to the employee's authenticated Manus account. */
     userId: int("userId"),
+    /** Browser device token bound on the first employee self-check-in. */
+    deviceId: varchar("deviceId", { length: 128 }),
     employeeCode: varchar("employeeCode", { length: 32 }).notNull().unique(),
     fullName: varchar("fullName", { length: 160 }).notNull(),
     department: varchar("department", { length: 120 }).notNull(),
@@ -42,6 +42,7 @@ export const attendance = mysqlTable(
   {
     id: int("id").autoincrement().primaryKey(),
     employeeId: int("employeeId").notNull(),
+    recordedByUserId: int("recordedByUserId"),
     workDate: varchar("workDate", { length: 10 }).notNull(),
     checkInAt: bigint("checkInAt", { mode: "number" }),
     checkOutAt: bigint("checkOutAt", { mode: "number" }),
@@ -49,6 +50,7 @@ export const attendance = mysqlTable(
     checkInMode: mysqlEnum("checkInMode", ["office", "offsite"]).default("office").notNull(),
     latitude: double("latitude"),
     longitude: double("longitude"),
+    deviceId: varchar("deviceId", { length: 128 }),
     note: text("note"),
     createdAt: bigint("createdAt", { mode: "number" }).notNull(),
     updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),

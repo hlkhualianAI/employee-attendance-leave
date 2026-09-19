@@ -29,6 +29,20 @@
       "when": 1789792414989,
       "tag": "0003_nervous_beyonder",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1789792871420,
+      "tag": "0004_steady_power_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1789793139038,
+      "tag": "0005_tidy_the_liberteens",
+      "breakpoints": true
     }
   ]
 }

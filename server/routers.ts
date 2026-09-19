@@ -18,10 +18,12 @@ import {
   getRecentAttendance,
   getUserById,
   getUsers,
+  bindEmployeeDevice,
   linkEmployeeUser,
   updateLeaveStatus,
   updateUserRole,
 } from "./db";
+import { getBangkokDate } from "./attendance.logic";
 
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "รูปแบบวันที่ไม่ถูกต้อง");
 const roleSchema = z.enum(["admin", "hr", "employee"]);
@@ -103,13 +105,16 @@ export const appRouter = router({
         }
         return linkEmployeeUser(input.employeeId, input.userId);
       }),
+    resetDevice: peopleOpsProcedure
+      .input(z.object({ employeeId: z.number().int().positive() }))
+      .mutation(({ input }) => bindEmployeeDevice(input.employeeId, null)),
   }),
   attendance: router({
     summary: staffProcedure.input(z.object({ month: z.string().regex(/^\d{4}-\d{2}$/) })).query(({ input, ctx }) => getDashboardSummary(input.month, ctx.user.role === "employee" ? ctx.user.id : undefined)),
     recent: staffProcedure.query(({ ctx }) => getRecentAttendance(8, ctx.user.role === "employee" ? ctx.user.id : undefined)),
     byDate: staffProcedure.input(z.object({ workDate: dateString })).query(({ input, ctx }) => getAttendanceByDate(input.workDate, ctx.user.role === "employee" ? ctx.user.id : undefined)),
     checkIn: staffProcedure
-      .input(z.object({ employeeId: z.number().int().positive(), workDate: dateString, timestamp: z.number().int(), checkInMode: z.enum(["office", "offsite"]), latitude: z.number().finite(), longitude: z.number().finite(), note: z.string().max(500).optional() }))
+      .input(z.object({ employeeId: z.number().int().positive(), checkInMode: z.enum(["office", "offsite"]), latitude: z.number().finite(), longitude: z.number().finite(), deviceId: z.string().min(16).max(128), note: z.string().max(500).optional() }))
       .mutation(async ({ input, ctx }) => {
         await assertEmployeeAccess(input.employeeId, ctx.user.id, ctx.user.role);
         if (!isValidCoordinate(input.latitude, input.longitude)) {
@@ -123,13 +128,21 @@ export const appRouter = router({
         } else if (!input.note?.trim()) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "กรุณาระบุเหตุผลเมื่อเลือกทำงานต่างจังหวัด" });
         }
-        return checkInEmployee(input.employeeId, input.workDate, input.timestamp, { checkInMode: input.checkInMode, latitude: input.latitude, longitude: input.longitude, note: input.note?.trim() || undefined });
+        if (ctx.user.role === "employee") {
+          const employee = await getEmployeeByUserId(ctx.user.id);
+          if (!employee) throw new TRPCError({ code: "FORBIDDEN", message: "บัญชียังไม่ได้ผูกกับโปรไฟล์พนักงาน" });
+          if (employee.deviceId && employee.deviceId !== input.deviceId) {
+            throw new TRPCError({ code: "FORBIDDEN", message: "อุปกรณ์นี้ไม่ใช่อุปกรณ์ที่ผูกกับบัญชีพนักงาน" });
+          }
+          if (!employee.deviceId) await bindEmployeeDevice(employee.id, input.deviceId);
+        }
+        return checkInEmployee(input.employeeId, getBangkokDate(), Date.now(), { checkInMode: input.checkInMode, latitude: input.latitude, longitude: input.longitude, deviceId: input.deviceId, recordedByUserId: ctx.user.id, note: input.note?.trim() || undefined });
       }),
     checkOut: staffProcedure
-      .input(z.object({ employeeId: z.number().int().positive(), workDate: dateString, timestamp: z.number().int() }))
+      .input(z.object({ employeeId: z.number().int().positive() }))
       .mutation(async ({ input, ctx }) => {
         await assertEmployeeAccess(input.employeeId, ctx.user.id, ctx.user.role);
-        return checkOutEmployee(input.employeeId, input.workDate, input.timestamp);
+        return checkOutEmployee(input.employeeId, getBangkokDate(), Date.now());
       }),
   }),
   leave: router({

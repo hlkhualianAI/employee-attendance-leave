@@ -10,6 +10,10 @@ export function getBangkokMinutes(timestamp: number) {
   return hour * 60 + minute;
 }
 
+export function getBangkokDate(timestamp = Date.now()) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date(timestamp));
+}
+
 export function calculateLateMinutes(timestamp: number, workStartMin: number) {
   return Math.max(0, getBangkokMinutes(timestamp) - workStartMin);
 }

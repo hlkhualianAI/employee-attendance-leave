@@ -24,19 +24,27 @@ function createAdminContext(): TrpcContext {
   };
 }
 
+const baseInput = {
+  employeeId: 1,
+  checkInMode: "office" as const,
+  latitude: 16.3974363,
+  longitude: 102.8603072,
+  deviceId: "test-device-1234567890",
+};
+
 describe("attendance location rules", () => {
   it("rejects invalid coordinates before writing attendance", async () => {
     const caller = appRouter.createCaller(createAdminContext());
-    await expect(caller.attendance.checkIn({ employeeId: 1, workDate: "2026-09-19", timestamp: Date.now(), checkInMode: "office", latitude: 100, longitude: 102 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(caller.attendance.checkIn({ ...baseInput, latitude: 100 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("rejects office check-in outside the configured geofence", async () => {
     const caller = appRouter.createCaller(createAdminContext());
-    await expect(caller.attendance.checkIn({ employeeId: 1, workDate: "2026-09-19", timestamp: Date.now(), checkInMode: "office", latitude: 16.4, longitude: 102.86 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.attendance.checkIn({ ...baseInput, latitude: 16.4, longitude: 102.86 })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("requires a reason for offsite check-in", async () => {
     const caller = appRouter.createCaller(createAdminContext());
-    await expect(caller.attendance.checkIn({ employeeId: 1, workDate: "2026-09-19", timestamp: Date.now(), checkInMode: "offsite", latitude: 16.4, longitude: 102.86 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(caller.attendance.checkIn({ ...baseInput, checkInMode: "offsite", latitude: 16.4, longitude: 102.86 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });

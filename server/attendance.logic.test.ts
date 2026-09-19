@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateLateMinutes, countWeekdays, getBangkokMinutes } from "./attendance.logic";
+import { calculateLateMinutes, countWeekdays, getBangkokDate, getBangkokMinutes } from "./attendance.logic";
 
 describe("attendance business rules", () => {
   it("uses Bangkok local time when calculating lateness", () => {
@@ -9,6 +9,10 @@ describe("attendance business rules", () => {
     expect(getBangkokMinutes(onTime)).toBe(540);
     expect(calculateLateMinutes(onTime, 540)).toBe(0);
     expect(calculateLateMinutes(late, 540)).toBe(17);
+  });
+
+  it("derives the work date from Bangkok time", () => {
+    expect(getBangkokDate(Date.parse("2026-09-18T17:00:00Z"))).toBe("2026-09-19");
   });
 
   it("counts weekdays only for leave duration", () => {

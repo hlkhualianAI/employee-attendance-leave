@@ -139,6 +139,13 @@ export async function linkEmployeeUser(employeeId: number, userId: number | null
   return { employeeId, userId };
 }
 
+export async function bindEmployeeDevice(employeeId: number, deviceId: string | null) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(employees).set({ deviceId, updatedAt: Date.now() }).where(eq(employees.id, employeeId));
+  return { employeeId, deviceId };
+}
+
 function scopedCondition(condition: ReturnType<typeof eq>, userId?: number) {
   return userId === undefined ? condition : and(condition, eq(employees.userId, userId));
 }
@@ -150,6 +157,7 @@ export async function getAttendanceByDate(workDate: string, userId?: number) {
     .select({
       id: attendance.id,
       employeeId: attendance.employeeId,
+      recordedByUserId: attendance.recordedByUserId,
       employeeCode: employees.employeeCode,
       fullName: employees.fullName,
       department: employees.department,
@@ -160,6 +168,7 @@ export async function getAttendanceByDate(workDate: string, userId?: number) {
       checkInMode: attendance.checkInMode,
       latitude: attendance.latitude,
       longitude: attendance.longitude,
+      deviceId: attendance.deviceId,
       note: attendance.note,
     })
     .from(attendance)
@@ -174,6 +183,7 @@ export async function getRecentAttendance(limit = 8, userId?: number) {
   return db
     .select({
       id: attendance.id,
+      recordedByUserId: attendance.recordedByUserId,
       fullName: employees.fullName,
       employeeCode: employees.employeeCode,
       department: employees.department,
@@ -184,6 +194,7 @@ export async function getRecentAttendance(limit = 8, userId?: number) {
       checkInMode: attendance.checkInMode,
       latitude: attendance.latitude,
       longitude: attendance.longitude,
+      deviceId: attendance.deviceId,
     })
     .from(attendance)
     .innerJoin(employees, eq(attendance.employeeId, employees.id))
@@ -258,7 +269,7 @@ export async function checkInEmployee(
   employeeId: number,
   workDate: string,
   timestamp: number,
-  input: { checkInMode: "office" | "offsite"; latitude: number; longitude: number; note?: string },
+  input: { checkInMode: "office" | "offsite"; latitude: number; longitude: number; deviceId: string; recordedByUserId: number; note?: string },
 ) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -276,7 +287,7 @@ export async function checkInEmployee(
   if (existing[0]) {
     await db
       .update(attendance)
-      .set({ checkInAt: timestamp, lateMinutes, checkInMode: input.checkInMode, latitude: input.latitude, longitude: input.longitude, note: input.note ?? existing[0].note, updatedAt: now })
+      .set({ checkInAt: timestamp, lateMinutes, checkInMode: input.checkInMode, latitude: input.latitude, longitude: input.longitude, deviceId: input.deviceId, recordedByUserId: input.recordedByUserId, note: input.note ?? existing[0].note, updatedAt: now })
       .where(eq(attendance.id, existing[0].id));
     return { id: existing[0].id, lateMinutes };
   }

@@ -42,6 +42,7 @@ type UserRow = {
 type EmployeeRow = {
   id: number;
   userId: number | null;
+  deviceId: string | null;
   employeeCode: string;
   fullName: string;
   department: string;
@@ -146,6 +147,15 @@ function effectiveRole(role: string | undefined): AppRole {
   return "employee";
 }
 
+function getBrowserDeviceId() {
+  const storageKey = "timekeep-device-id";
+  const existing = window.localStorage.getItem(storageKey);
+  if (existing) return existing;
+  const deviceId = typeof window.crypto?.randomUUID === "function" ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  window.localStorage.setItem(storageKey, deviceId);
+  return deviceId;
+}
+
 export default function Home() {
   const { user } = useAuth();
   const role = effectiveRole(user?.role);
@@ -237,6 +247,14 @@ export default function Home() {
     onError: (error) => toast.error(error.message || "เชื่อมบัญชีไม่สำเร็จ"),
   });
 
+  const resetDeviceMutation = trpc.employees.resetDevice.useMutation({
+    onSuccess: () => {
+      toast.success("รีเซ็ตอุปกรณ์แล้ว พนักงานจะผูกอุปกรณ์ใหม่เมื่อเช็คอินครั้งถัดไป");
+      void utils.employees.list.invalidate();
+    },
+    onError: (error) => toast.error(error.message || "รีเซ็ตอุปกรณ์ไม่สำเร็จ"),
+  });
+
   const employees = (employeesQuery.data ?? []) as EmployeeRow[];
   const users = (usersQuery.data ?? []) as UserRow[];
 
@@ -277,11 +295,10 @@ export default function Home() {
         setLocationStatus("ready");
         checkInMutation.mutate({
           employeeId: selectedEmployee.id,
-          workDate: today,
-          timestamp: Date.now(),
           checkInMode,
           latitude: currentLocation.latitude,
           longitude: currentLocation.longitude,
+          deviceId: getBrowserDeviceId(),
           note: checkInMode === "offsite" ? offsiteReason.trim() : undefined,
         });
       },
@@ -289,7 +306,7 @@ export default function Home() {
         setLocationStatus("error");
         toast.error(error.code === error.PERMISSION_DENIED ? "กรุณาอนุญาตการเข้าถึงตำแหน่งเพื่อเช็คอิน" : "ไม่สามารถอ่านตำแหน่งปัจจุบันได้");
       },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
     );
   }
 
@@ -331,7 +348,7 @@ export default function Home() {
         {role === "employee" && !hasLinkedProfile && <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" /><div><p className="font-semibold">บัญชียังไม่ได้ผูกกับโปรไฟล์พนักงาน</p><p className="mt-1 text-xs leading-5">ติดต่อผู้ดูแลระบบหรือฝ่ายบุคคลเพื่อเชื่อมบัญชีของคุณกับข้อมูลพนักงานก่อนใช้งานเช็คอินและวันลา</p></div></div>}
 
         <section className="grid gap-5 xl:grid-cols-[1.35fr_0.65fr]">
-          <div className="relative overflow-hidden rounded-[28px] bg-[#173b38] p-7 text-white shadow-[0_18px_45px_rgba(24,59,56,0.16)] md:p-9"><div className="absolute -right-14 -top-20 h-64 w-64 rounded-full border-[30px] border-white/5" /><div className="absolute bottom-[-110px] right-24 h-56 w-56 rounded-full border-[26px] border-[#d57945]/15" /><div className="relative flex flex-col justify-between gap-8 md:flex-row md:items-end"><div className="max-w-xl"><div className="mb-5 flex items-center gap-3 text-sm font-medium text-[#b7d7ca]"><Clock3 className="h-4 w-4" /> การลงเวลาประจำวัน</div><h2 className="font-display text-3xl font-semibold leading-tight md:text-4xl">ทำให้ทุกนาที<br /><span className="text-[#e5ad7e]">ชัดเจนและตรวจสอบได้</span></h2><p className="mt-4 max-w-md text-sm leading-6 text-[#b4c9c0]">{role === "employee" ? "เช็คอินและเช็คเอาต์ของคุณได้จากที่นี่ ข้อมูลจะถูกบันทึกตามเวลาไทยและคำนวณการมาสายอัตโนมัติ" : "เลือกพนักงานเพื่อบันทึกเวลาเข้าออก ระบบจะคำนวณเวลามาสายจากเวลาเริ่มงานของแต่ละคนโดยอัตโนมัติ"}</p></div><div className="w-full max-w-xs rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur-sm"><Label className="text-xs font-medium text-[#c5d9d0]">พนักงานที่จะลงเวลา</Label><select className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#244d49] px-3 text-sm text-white outline-none ring-offset-2 focus:ring-2 focus:ring-[#e5ad7e] disabled:cursor-not-allowed disabled:opacity-70" value={activeEmployeeId ?? ""} disabled={role === "employee" || !employees.length} onChange={(event) => setSelectedEmployeeId(event.target.value ? Number(event.target.value) : "")}><option value="">{employees.length ? "เลือกพนักงาน" : "ยังไม่มีโปรไฟล์พนักงาน"}</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.fullName} · {employee.employeeCode}</option>)}</select><label className="mt-3 flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs text-[#e2eee8]"><span className="flex items-center gap-2"><input type="checkbox" checked={checkInMode === "offsite"} onChange={(event) => { setCheckInMode(event.target.checked ? "offsite" : "office"); setLocationStatus("idle"); }} className="h-4 w-4 accent-[#e5ad7e]" /><Plane className="h-3.5 w-3.5 text-[#e5ad7e]" /> ไปทำงานต่างจังหวัด</span><span className="text-[10px] text-[#b4c9c0]">{checkInMode === "offsite" ? "ข้ามพื้นที่" : "รัศมี 150 ม."}</span></label>{checkInMode === "offsite" && <Input value={offsiteReason} onChange={(event) => setOffsiteReason(event.target.value)} placeholder="เหตุผล / จังหวัดที่ไป" className="mt-2 border-white/10 bg-[#244d49] text-white placeholder:text-[#9bbab0]" /> }<div className="mt-3 flex gap-2"><Button className="flex-1 bg-[#e5ad7e] text-[#273c37] hover:bg-[#f0bd93]" disabled={!selectedEmployee || isBusy || (checkInMode === "offsite" && !offsiteReason.trim())} onClick={handleCheckIn}><Navigation className="mr-2 h-4 w-4" /> {locationStatus === "requesting" ? "กำลังค้นหา..." : "เช็คอิน"}</Button><Button variant="outline" className="border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white" disabled={!todayAttendance?.checkInAt || isBusy} onClick={() => checkOutMutation.mutate({ employeeId: selectedEmployee!.id, workDate: today, timestamp: Date.now() })}><LogOut className="mr-2 h-4 w-4" /> เช็คเอาต์</Button></div>{selectedEmployee && <p className="mt-3 text-xs text-[#b4c9c0]">เวลาเริ่มงาน {String(Math.floor(selectedEmployee.workStartMin / 60)).padStart(2, "0")}:{String(selectedEmployee.workStartMin % 60).padStart(2, "0")} น. {todayAttendance?.checkInAt ? `· เข้าแล้ว ${displayTime(todayAttendance.checkInAt)}` : locationStatus === "ready" && location ? "· พบตำแหน่ง GPS แล้ว" : "· ต้องอนุญาต GPS ก่อนเช็คอิน"}</p>}</div></div></div>
+          <div className="relative overflow-hidden rounded-[28px] bg-[#173b38] p-7 text-white shadow-[0_18px_45px_rgba(24,59,56,0.16)] md:p-9"><div className="absolute -right-14 -top-20 h-64 w-64 rounded-full border-[30px] border-white/5" /><div className="absolute bottom-[-110px] right-24 h-56 w-56 rounded-full border-[26px] border-[#d57945]/15" /><div className="relative flex flex-col justify-between gap-8 md:flex-row md:items-end"><div className="max-w-xl"><div className="mb-5 flex items-center gap-3 text-sm font-medium text-[#b7d7ca]"><Clock3 className="h-4 w-4" /> การลงเวลาประจำวัน</div><h2 className="font-display text-3xl font-semibold leading-tight md:text-4xl">ทำให้ทุกนาที<br /><span className="text-[#e5ad7e]">ชัดเจนและตรวจสอบได้</span></h2><p className="mt-4 max-w-md text-sm leading-6 text-[#b4c9c0]">{role === "employee" ? "เช็คอินและเช็คเอาต์ของคุณได้จากที่นี่ ข้อมูลจะถูกบันทึกตามเวลาไทยและคำนวณการมาสายอัตโนมัติ" : "เลือกพนักงานเพื่อบันทึกเวลาเข้าออก ระบบจะคำนวณเวลามาสายจากเวลาเริ่มงานของแต่ละคนโดยอัตโนมัติ"}</p></div><div className="w-full max-w-xs rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur-sm"><Label className="text-xs font-medium text-[#c5d9d0]">พนักงานที่จะลงเวลา</Label><select className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#244d49] px-3 text-sm text-white outline-none ring-offset-2 focus:ring-2 focus:ring-[#e5ad7e] disabled:cursor-not-allowed disabled:opacity-70" value={activeEmployeeId ?? ""} disabled={role === "employee" || !employees.length} onChange={(event) => setSelectedEmployeeId(event.target.value ? Number(event.target.value) : "")}><option value="">{employees.length ? "เลือกพนักงาน" : "ยังไม่มีโปรไฟล์พนักงาน"}</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.fullName} · {employee.employeeCode}</option>)}</select><label className="mt-3 flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs text-[#e2eee8]"><span className="flex items-center gap-2"><input type="checkbox" checked={checkInMode === "offsite"} onChange={(event) => { setCheckInMode(event.target.checked ? "offsite" : "office"); setLocationStatus("idle"); }} className="h-4 w-4 accent-[#e5ad7e]" /><Plane className="h-3.5 w-3.5 text-[#e5ad7e]" /> ไปทำงานต่างจังหวัด</span><span className="text-[10px] text-[#b4c9c0]">{checkInMode === "offsite" ? "นอกสำนักงาน" : "ในสำนักงาน"}</span></label>{checkInMode === "offsite" && <Input value={offsiteReason} onChange={(event) => setOffsiteReason(event.target.value)} placeholder="เหตุผล / จังหวัดที่ไป" className="mt-2 border-white/10 bg-[#244d49] text-white placeholder:text-[#9bbab0]" /> }<div className="mt-3 flex gap-2"><Button className="flex-1 bg-[#e5ad7e] text-[#273c37] hover:bg-[#f0bd93]" disabled={!selectedEmployee || isBusy || (checkInMode === "offsite" && !offsiteReason.trim())} onClick={handleCheckIn}><Navigation className="mr-2 h-4 w-4" /> {locationStatus === "requesting" ? "กำลังค้นหา..." : "เช็คอิน"}</Button><Button variant="outline" className="border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white" disabled={!todayAttendance?.checkInAt || isBusy} onClick={() => checkOutMutation.mutate({ employeeId: selectedEmployee!.id })}><LogOut className="mr-2 h-4 w-4" /> เช็คเอาต์</Button></div>{selectedEmployee && <p className="mt-3 text-xs text-[#b4c9c0]">เวลาเริ่มงาน {String(Math.floor(selectedEmployee.workStartMin / 60)).padStart(2, "0")}:{String(selectedEmployee.workStartMin % 60).padStart(2, "0")} น. {todayAttendance?.checkInAt ? `· เข้าแล้ว ${displayTime(todayAttendance.checkInAt)}` : locationStatus === "ready" && location ? "· พบตำแหน่ง GPS แล้ว" : "· ต้องอนุญาต GPS ก่อนเช็คอิน"}</p>}</div></div></div>
           <div className="grid grid-cols-2 gap-4"><MetricCard label={role === "employee" ? "โปรไฟล์ของฉัน" : "พนักงานที่ใช้งาน"} value={summary.totalEmployees} suffix={role === "employee" ? "รายการ" : "คน"} icon={<Users className="h-5 w-5" />} tone="sage" /><MetricCard label="วันมาทำงาน" value={summary.presentDays} suffix="รายการ" icon={<CheckCircle2 className="h-5 w-5" />} tone="blue" /><MetricCard label="มาสาย" value={summary.lateDays} suffix="รายการ" icon={<AlarmClock className="h-5 w-5" />} tone="orange" /><MetricCard label="วันลาที่อนุมัติ" value={summary.approvedLeaveDays} suffix="วัน" icon={<CalendarDays className="h-5 w-5" />} tone="purple" /></div>
         </section>
 
@@ -348,6 +365,7 @@ export default function Home() {
         </section>
 
         {isAdmin && <RoleManagementCard users={users} employees={employees} onRoleChange={(id, nextRole) => updateRoleMutation.mutate({ id, role: nextRole })} onLinkUser={(employeeId, userId) => linkUserMutation.mutate({ employeeId, userId })} isPending={updateRoleMutation.isPending || linkUserMutation.isPending} />}
+        {canManage && <DeviceBindingCard employees={employees} onReset={(employeeId) => resetDeviceMutation.mutate({ employeeId })} isPending={resetDeviceMutation.isPending} />}
       </div>
     </div>
   );
@@ -357,6 +375,10 @@ function RoleManagementCard({ users, employees, onRoleChange, onLinkUser, isPend
   const [linkEmployeeId, setLinkEmployeeId] = useState("");
   const [linkUserId, setLinkUserId] = useState("");
   return <section className="rounded-[24px] border border-[#d9e2df] bg-[#eef5f1] p-6 shadow-[0_12px_35px_rgba(43,64,54,0.04)]"><div className="flex flex-col justify-between gap-4 md:flex-row md:items-start"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6f8b80]">ADMIN ONLY</p><h2 className="mt-1 flex items-center gap-2 font-display text-xl font-semibold text-[#29443d]"><ShieldCheck className="h-5 w-5 text-[#3c7c69]" />จัดการสิทธิ์การใช้งาน</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-[#6d8179]">กำหนดบทบาทให้บัญชีผู้ใช้ และเชื่อมบัญชีเข้ากับโปรไฟล์พนักงานเพื่อจำกัดการเห็นข้อมูลอย่างถูกต้อง</p></div><div className="rounded-xl bg-white p-3 text-[#4e806f]"><UserRoundCog className="h-5 w-5" /></div></div><div className="mt-6 grid gap-5 lg:grid-cols-[1.1fr_0.9fr]"><div className="rounded-2xl border border-[#dce8de] bg-white p-4"><p className="mb-3 text-sm font-semibold text-[#35554b]">บัญชีผู้ใช้และบทบาท</p><div className="space-y-2">{users.length ? users.map((account) => <div key={account.id} className="flex flex-col gap-3 rounded-xl border border-[#edf1ed] p-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="truncate text-sm font-semibold text-[#3a554b]">{account.name || "ไม่มีชื่อ"}</p><p className="truncate text-xs text-[#8b9a92]">{account.email || "ไม่มีอีเมล"}</p></div><select className="h-9 rounded-lg border border-[#dfe8e0] bg-white px-2 text-xs font-medium text-[#43685b] outline-none focus:ring-2 focus:ring-[#8bb9a8]" value={account.role === "user" ? "employee" : account.role} disabled={isPending} onChange={(event) => onRoleChange(account.id, event.target.value as RoleSelect)}><option value="admin">ผู้ดูแลระบบ</option><option value="hr">ฝ่ายบุคคล</option><option value="employee">พนักงานทั่วไป</option></select></div>) : <p className="py-6 text-center text-xs text-[#9aa69f]">ยังไม่พบบัญชีผู้ใช้</p>}</div></div><div className="rounded-2xl border border-[#dce8de] bg-white p-4"><p className="mb-1 text-sm font-semibold text-[#35554b]">เชื่อมบัญชีกับพนักงาน</p><p className="mb-4 text-xs leading-5 text-[#8b9a92]">พนักงานทั่วไปต้องมีการเชื่อมบัญชีจึงจะเห็นข้อมูลของตนเอง</p><div className="space-y-3"><FormField label="โปรไฟล์พนักงาน"><select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring" value={linkEmployeeId} onChange={(event) => setLinkEmployeeId(event.target.value)}><option value="">เลือกพนักงาน</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.fullName} · {employee.employeeCode}</option>)}</select></FormField><FormField label="บัญชีผู้ใช้"><select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring" value={linkUserId} onChange={(event) => setLinkUserId(event.target.value)}><option value="">เลือกบัญชี</option>{users.filter((account) => account.role === "employee" || account.role === "user").map((account) => <option key={account.id} value={account.id}>{account.name || account.email || `User #${account.id}`}</option>)}</select></FormField><Button className="w-full bg-[#2f7564] hover:bg-[#276355]" disabled={!linkEmployeeId || !linkUserId || isPending} onClick={() => onLinkUser(Number(linkEmployeeId), Number(linkUserId))}><Link2 className="mr-2 h-4 w-4" />เชื่อมบัญชี</Button></div></div></div></section>;
+}
+
+function DeviceBindingCard({ employees, onReset, isPending }: { employees: EmployeeRow[]; onReset: (employeeId: number) => void; isPending: boolean }) {
+  return <section className="rounded-[24px] border border-[#e4e9e4] bg-white p-6 shadow-[0_12px_35px_rgba(43,64,54,0.04)]"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#91a19a]">SECURITY CONTROL</p><h2 className="mt-1 font-display text-xl font-semibold text-[#29443d]">อุปกรณ์ที่ใช้เช็คอิน</h2><p className="mt-2 text-sm leading-6 text-[#6d8179]">ระบบจะผูกอุปกรณ์แรกของพนักงานไว้ และปฏิเสธการเช็คอินจากอุปกรณ์อื่น ผู้ดูแลสามารถรีเซ็ตได้เมื่อพนักงานเปลี่ยนเครื่อง</p></div><div className="rounded-xl bg-[#f3f8f3] p-3 text-[#4e806f]"><ShieldCheck className="h-5 w-5" /></div></div><div className="mt-5 grid gap-3 md:grid-cols-2">{employees.length ? employees.map((employee) => <div key={employee.id} className="flex items-center justify-between gap-3 rounded-2xl border border-[#edf1ed] p-4"><div className="min-w-0"><p className="truncate text-sm font-semibold text-[#3a554b]">{employee.fullName}</p><p className="mt-1 text-xs text-[#8b9a92]">{employee.employeeCode} · {employee.deviceId ? "ผูกอุปกรณ์แล้ว" : "ยังไม่ผูกอุปกรณ์"}</p></div><Button size="sm" variant="outline" disabled={!employee.deviceId || isPending} onClick={() => onReset(employee.id)} className="shrink-0 border-[#dfe8e0] text-xs text-[#4d7166]">รีเซ็ต</Button></div>) : <p className="col-span-full py-4 text-center text-xs text-[#9aa69f]">ยังไม่มีข้อมูลพนักงาน</p>}</div></section>;
 }
 
 function MetricCard({ label, value, suffix, icon, tone }: { label: string; value: number; suffix: string; icon: React.ReactNode; tone: "sage" | "blue" | "orange" | "purple" }) {
