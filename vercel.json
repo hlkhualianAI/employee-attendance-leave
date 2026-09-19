@@ -1,5 +1,11 @@
 {
   "buildCommand": "pnpm build",
   "installCommand": "pnpm install --frozen-lockfile",
-  "outputDirectory": "dist/public"
+  "outputDirectory": "dist/public",
+  "rewrites": [
+    {
+      "source": "/api/trpc/:procedure*",
+      "destination": "/api/trpc?procedure=:procedure*"
+    }
+  ]
 }
