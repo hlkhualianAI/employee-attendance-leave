@@ -953,13 +953,16 @@ var trpc_default = createExpressMiddleware({
 
 // serverless/trpc-handler.ts
 function handler(req, res) {
-  const procedure = typeof req.query.procedure === "string" ? req.query.procedure : "";
+  const requestUrl = new URL(req.url ?? "/", "http://vercel.local");
+  const requestQuery = req.query ?? {};
+  const procedureFromQuery = requestQuery.procedure;
+  const procedure = typeof procedureFromQuery === "string" ? procedureFromQuery : requestQuery.procedure instanceof Array ? requestQuery.procedure.join("/") : requestUrl.searchParams.get("procedure") ?? requestUrl.pathname.replace(/^\/api\/trpc\/?/, "");
   if (!procedure) {
     res.status(400).json({ error: "Missing tRPC procedure path" });
     return;
   }
   const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(req.query)) {
+  for (const [key, value] of Object.entries(requestQuery)) {
     if (key === "procedure") continue;
     if (Array.isArray(value)) {
       value.forEach((item) => query.append(key, item));
