@@ -498,6 +498,36 @@ export default function Home() {
         },
         { รายการ: "คำขอลารอตรวจสอบ", ค่า: report.data.summary.pendingLeaves },
       ];
+      const dailyRows = calendarDateRange(selectedMonth)
+        .filter(Boolean)
+        .map(date => {
+          const attendance = report.data.attendance.filter(
+            row => row.workDate === date
+          );
+          const leaves = report.data.leave.filter(
+            row => date! >= row.startDate && date! <= row.endDate
+          );
+          return {
+            วันที่: date,
+            วัน: new Intl.DateTimeFormat("th-TH", {
+              weekday: "long",
+              timeZone: "Asia/Bangkok",
+            }).format(new Date(`${date}T00:00:00+07:00`)),
+            "มาทำงาน (คน)": attendance.length,
+            "มาสาย (คน)": attendance.filter(row => row.lateMinutes > 0).length,
+            รายชื่อผู้มาสาย: attendance
+              .filter(row => row.lateMinutes > 0)
+              .map(row => `${row.fullName} (${row.lateMinutes} นาที)`)
+              .join(", "),
+            "ลา (รายการ)": leaves.length,
+            รายชื่อผู้ลา: leaves
+              .map(
+                row =>
+                  `${row.fullName} (${leaveTypeLabels[row.leaveType]} · ${statusLabel(row.status).text})`
+              )
+              .join(", "),
+          };
+        });
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(
         workbook,
@@ -513,6 +543,11 @@ export default function Home() {
         workbook,
         XLSX.utils.json_to_sheet(leaveRows),
         "วันลา"
+      );
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.json_to_sheet(dailyRows),
+        "สรุปรายวัน"
       );
       XLSX.writeFile(workbook, `รายงานการทำงาน-${selectedMonth}.xlsx`);
       toast.success("ส่งออกไฟล์ Excel เรียบร้อยแล้ว");
