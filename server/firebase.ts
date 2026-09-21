@@ -1,6 +1,6 @@
-import type { App } from "firebase-admin/app";
-import type { Auth } from "firebase-admin/auth";
-import type { Firestore } from "firebase-admin/firestore";
+import { cert, getApps, initializeApp, type App } from "firebase-admin/app";
+import { getAuth, type Auth } from "firebase-admin/auth";
+import { getFirestore, type Firestore } from "firebase-admin/firestore";
 
 function requiredEnv(name: string): string {
   const value = process.env[name];
@@ -9,7 +9,6 @@ function requiredEnv(name: string): string {
 }
 
 async function getFirebaseApp(): Promise<App> {
-  const { cert, getApps, initializeApp } = await import("firebase-admin/app");
   const existingApp = getApps()[0];
   if (existingApp) return existingApp;
 
@@ -28,7 +27,6 @@ let firebaseAuth: Auth | undefined;
 /** Returns the shared server-side Firestore client. Never import this from client code. */
 export async function getFirestoreDb(): Promise<Firestore> {
   if (!firestore) {
-    const { getFirestore } = await import("firebase-admin/firestore");
     firestore = getFirestore(await getFirebaseApp());
   }
   return firestore;
@@ -36,7 +34,6 @@ export async function getFirestoreDb(): Promise<Firestore> {
 
 export async function getFirebaseAuth(): Promise<Auth> {
   if (!firebaseAuth) {
-    const { getAuth } = await import("firebase-admin/auth");
     firebaseAuth = getAuth(await getFirebaseApp());
   }
   return firebaseAuth;
