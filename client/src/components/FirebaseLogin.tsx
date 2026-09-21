@@ -40,7 +40,7 @@ export default function FirebaseLogin() {
         <div className="space-y-2 text-center">
           <p className="text-sm font-medium text-primary">TIMEKEEP</p>
           <h1 className="text-2xl font-semibold">ระบบลงข้อมูลการเข้าทำงานของหัวเหรียญขอนแก่น</h1>
-          <p className="text-sm text-muted-foreground">เข้าสู่ระบบด้วยอีเมลของคุณ ไม่ต้องผ่าน Manus</p>
+          <p className="text-sm text-muted-foreground">เข้าสู่ระบบด้วยอีเมลและรหัสผ่านของคุณ</p>
         </div>
         <div className="space-y-2">
           <Label htmlFor="email">อีเมล</Label>
