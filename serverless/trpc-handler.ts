@@ -28,5 +28,9 @@ export default function handler(req: Request, res: Response) {
   }
 
   req.url = `/${procedure}${query.size ? `?${query.toString()}` : ""}`;
+  // The Express tRPC adapter derives the procedure path from req.path.
+  // Vercel invokes this function with a raw Node request, so Express has not
+  // populated that convenience property for us.
+  (req as Request & { path: string }).path = `/${procedure}`;
   return middleware(req, res, () => undefined);
 }

@@ -971,6 +971,7 @@ function handler(req, res) {
     }
   }
   req.url = `/${procedure}${query.size ? `?${query.toString()}` : ""}`;
+  req.path = `/${procedure}`;
   return trpc_default(req, res, () => void 0);
 }
 export {
