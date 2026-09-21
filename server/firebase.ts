@@ -15,13 +15,13 @@ function requiredEnv(name: string): string {
 }
 
 function getFirebasePrivateKey(): string {
+  const plain = process.env.FIREBASE_PRIVATE_KEY;
+  if (plain) return plain.trim().replace(/^['"]|['"]$/g, "").replace(/\\n/g, "\n");
   const compressed = process.env.FIREBASE_PRIVATE_KEY_GZIP_B64;
-  if (compressed) {
-    return gunzipSync(Buffer.from(compressed, "base64")).toString("utf8");
-  }
+  if (compressed) return gunzipSync(Buffer.from(compressed, "base64")).toString("utf8");
   const encoded = process.env.FIREBASE_PRIVATE_KEY_B64;
   if (encoded) return Buffer.from(encoded, "base64").toString("utf8");
-  return requiredEnv("FIREBASE_PRIVATE_KEY").replace(/\\n/g, "\n");
+  throw new Error("Missing required Firebase private key environment variable");
 }
 
 async function getFirebaseApp(): Promise<App> {
