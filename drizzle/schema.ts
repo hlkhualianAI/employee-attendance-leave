@@ -24,6 +24,7 @@ export const employees = mysqlTable(
     fullName: varchar("fullName", { length: 160 }).notNull(),
     department: varchar("department", { length: 120 }).notNull(),
     position: varchar("position", { length: 120 }).notNull(),
+    startDate: varchar("startDate", { length: 10 }).notNull(),
     workStartMin: int("workStartMin").default(510).notNull(),
     workEndMin: int("workEndMin").default(1050).notNull(),
     status: mysqlEnum("status", ["active", "inactive"]).default("active").notNull(),

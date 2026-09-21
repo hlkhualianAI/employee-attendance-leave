@@ -1,6 +1,6 @@
 import type { Firestore } from "firebase-admin/firestore";
 import { calculateLateMinutes, countWeekdays } from "./attendance.logic";
-import { getFirestoreDb } from "./firebase";
+import { getFirebaseAuth, getFirestoreDb } from "./firebase";
 import type {
   Attendance,
   Employee,
@@ -38,6 +38,12 @@ function asNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" ? value : Number(value ?? fallback);
 }
 
+function bangkokDateFromTimestamp(timestamp: number) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(
+    new Date(timestamp)
+  );
+}
+
 function mapUser(data: FirestoreRecord): User {
   return {
     id: asNumber(data.id),
@@ -61,6 +67,9 @@ function mapEmployee(data: FirestoreRecord): Employee {
     fullName: String(data.fullName ?? ""),
     department: String(data.department ?? ""),
     position: String(data.position ?? ""),
+    startDate: String(
+      data.startDate ?? bangkokDateFromTimestamp(asNumber(data.createdAt))
+    ),
     workStartMin: asNumber(data.workStartMin, 510),
     workEndMin: asNumber(data.workEndMin, 1050),
     status: (data.status as Employee["status"]) ?? "active",
@@ -163,6 +172,28 @@ export async function getUserByOpenId(openId: string) {
 }
 
 export async function getUsers() {
+  const auth = await getFirebaseAuth();
+  let pageToken: string | undefined;
+  do {
+    const page = await auth.listUsers(1000, pageToken);
+    const knownUsers = await records("users");
+    const knownOpenIds = new Set(knownUsers.map(user => String(user.openId ?? "")));
+    for (const authUser of page.users) {
+      if (!knownOpenIds.has(authUser.uid)) {
+        await upsertUser({
+          openId: authUser.uid,
+          name: authUser.displayName ?? authUser.email ?? null,
+          email: authUser.email ?? null,
+          loginMethod: authUser.providerData[0]?.providerId ?? "firebase",
+          role: "employee",
+          lastSignedIn: authUser.metadata.lastSignInTime
+            ? new Date(authUser.metadata.lastSignInTime)
+            : new Date(),
+        });
+      }
+    }
+    pageToken = page.pageToken;
+  } while (pageToken);
   return (await records("users"))
     .map(mapUser)
     .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""))
@@ -215,6 +246,7 @@ export async function createEmployee(input: {
   fullName: string;
   department: string;
   position: string;
+  startDate: string;
   workStartMin?: number;
   workEndMin?: number;
   userId?: number;
@@ -236,6 +268,7 @@ export async function createEmployee(input: {
     fullName: input.fullName,
     department: input.department,
     position: input.position,
+    startDate: input.startDate,
     workStartMin: input.workStartMin ?? 510,
     workEndMin: input.workEndMin ?? 1050,
     status: "active",
@@ -252,6 +285,7 @@ export async function updateEmployee(input: {
   fullName?: string;
   department?: string;
   position?: string;
+  startDate?: string;
   workStartMin?: number;
   workEndMin?: number;
 }) {
@@ -684,18 +718,21 @@ export async function seedDemoData() {
       fullName: "สมชาย ใจดี",
       department: "ฝ่ายขาย",
       position: "Sales Executive",
+      startDate: "2024-01-08",
     },
     {
       employeeCode: "EMP-002",
       fullName: "สมหญิง พรประเสริฐ",
       department: "ฝ่ายบุคคล",
       position: "HR Officer",
+      startDate: "2024-02-01",
     },
     {
       employeeCode: "EMP-003",
       fullName: "ธนกร ศรีสุข",
       department: "ฝ่ายบัญชี",
       position: "Accountant",
+      startDate: "2024-03-04",
     },
   ];
   for (const employee of demoEmployees) await createEmployee(employee);

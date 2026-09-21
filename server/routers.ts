@@ -109,6 +109,7 @@ export const appRouter = router({
           fullName: z.string().min(1).max(160),
           department: z.string().min(1).max(120),
           position: z.string().min(1).max(120),
+          startDate: dateString,
           workStartMin: z.number().int().min(0).max(1439).optional(),
           workEndMin: z.number().int().min(0).max(1439).optional(),
           userId: z.number().int().positive().optional(),
@@ -123,6 +124,7 @@ export const appRouter = router({
           fullName: z.string().min(1).max(160),
           department: z.string().min(1).max(120),
           position: z.string().min(1).max(120),
+          startDate: dateString,
           workStartMin: z.number().int().min(0).max(1439).optional(),
           workEndMin: z.number().int().min(0).max(1439).optional(),
         })

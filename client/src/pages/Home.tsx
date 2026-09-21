@@ -51,6 +51,7 @@ type EmployeeRow = {
   fullName: string;
   department: string;
   position: string;
+  startDate: string;
   workStartMin: number;
   workEndMin: number;
   status: "active" | "inactive";
@@ -249,6 +250,8 @@ export default function Home() {
   const [selectedMonth, setSelectedMonth] = useState(month);
   const [rangeStart, setRangeStart] = useState(`${month}-01`);
   const [rangeEnd, setRangeEnd] = useState(monthEnd(month));
+  const [insightStart, setInsightStart] = useState(`${month}-01`);
+  const [insightEnd, setInsightEnd] = useState(monthEnd(month));
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | "">("");
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
   const [showLeaveForm, setShowLeaveForm] = useState(false);
@@ -257,6 +260,7 @@ export default function Home() {
     fullName: "",
     department: "",
     position: "",
+    startDate: today,
   });
   const [leaveForm, setLeaveForm] = useState({
     employeeId: "",
@@ -274,7 +278,7 @@ export default function Home() {
 
   const utils = trpc.useUtils();
   const employeesQuery = trpc.employees.list.useQuery();
-  const usersQuery = trpc.users.list.useQuery(undefined, { enabled: canManage });
+  const usersQuery = trpc.users.list.useQuery(undefined, { enabled: isAdmin });
   const summaryQuery = trpc.attendance.summary.useQuery({
     month: selectedMonth,
   });
@@ -284,6 +288,10 @@ export default function Home() {
   const reportQuery = trpc.attendance.reportRange.useQuery({
     startDate: rangeStart,
     endDate: rangeEnd,
+  });
+  const employeeInsightQuery = trpc.attendance.reportRange.useQuery({
+    startDate: insightStart,
+    endDate: insightEnd,
   });
   const exportQuery = trpc.attendance.reportRange.useQuery(
     { startDate: rangeStart, endDate: rangeEnd },
@@ -298,6 +306,7 @@ export default function Home() {
         fullName: "",
         department: "",
         position: "",
+        startDate: today,
       });
       setShowEmployeeForm(false);
       void utils.employees.list.invalidate();
@@ -923,7 +932,7 @@ export default function Home() {
                                   className="truncate rounded-md bg-[#fff1e6] px-1.5 py-1 text-[10px] font-semibold text-[#b76632]"
                                   title={`${row.fullName} · สาย ${row.lateMinutes} นาที`}
                                 >
-                                  สาย · {row.employeeCode}
+                                  สาย · {row.fullName}
                                 </div>
                               ))}
                             {attendance
@@ -935,7 +944,7 @@ export default function Home() {
                                   className="truncate rounded-md bg-[#edf8f0] px-1.5 py-1 text-[10px] font-medium text-[#398157]"
                                   title={row.fullName}
                                 >
-                                  เข้า · {row.employeeCode}
+                                  เข้า · {row.fullName}
                                 </div>
                               ))}
                             {leaves.slice(0, 2).map(row => (
@@ -944,7 +953,7 @@ export default function Home() {
                                 className={`truncate rounded-md px-1.5 py-1 text-[10px] font-semibold ${row.status === "approved" ? "bg-[#eef0ff] text-[#626ca8]" : "bg-[#f3f0ff] text-[#8174ae]"}`}
                                 title={`${row.fullName} · ${leaveTypeLabels[row.leaveType]} · ${statusLabel(row.status).text}`}
                               >
-                                ลา · {row.employeeCode}
+                                ลา · {row.fullName}
                               </div>
                             ))}
                             {attendance.filter(row => row.lateMinutes > 0)
@@ -1227,6 +1236,19 @@ export default function Home() {
                       placeholder="ชื่อพนักงาน"
                     />
                   </FormField>
+                  <FormField label="วันเริ่มงาน">
+                    <Input
+                      required
+                      type="date"
+                      value={employeeForm.startDate}
+                      onChange={event =>
+                        setEmployeeForm({
+                          ...employeeForm,
+                          startDate: event.target.value,
+                        })
+                      }
+                    />
+                  </FormField>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <FormField label="แผนก">
                       <Input
@@ -1474,10 +1496,16 @@ export default function Home() {
         )}
         <EmployeeInsightsCard
           employees={employees}
-          attendance={reportAttendance as ReportAttendanceRow[]}
-          leaves={reportLeaves as ReportLeaveRow[]}
+          attendance={(employeeInsightQuery.data?.attendance ?? []) as ReportAttendanceRow[]}
+          leaves={(employeeInsightQuery.data?.leave ?? []) as ReportLeaveRow[]}
+          startDate={insightStart}
+          endDate={insightEnd}
+          onRangeChange={(nextStart, nextEnd) => {
+            setInsightStart(nextStart);
+            setInsightEnd(nextEnd);
+          }}
         />
-        {canManage && (
+        {isAdmin && (
           <RoleManagementCard
             users={users}
             employees={employees}
@@ -1508,10 +1536,16 @@ function EmployeeInsightsCard({
   employees,
   attendance,
   leaves,
+  startDate,
+  endDate,
+  onRangeChange,
 }: {
   employees: EmployeeRow[];
   attendance: ReportAttendanceRow[];
   leaves: ReportLeaveRow[];
+  startDate: string;
+  endDate: string;
+  onRangeChange: (startDate: string, endDate: string) => void;
 }) {
   const [employeeId, setEmployeeId] = useState<number | "">(employees[0]?.id ?? "");
   const employee = employees.find(row => row.id === employeeId) ?? employees[0];
@@ -1519,7 +1553,7 @@ function EmployeeInsightsCard({
   const employeeAttendance = attendance.filter(row => row.employeeCode === employee.employeeCode);
   const employeeLeaves = leaves.filter(row => row.employeeCode === employee.employeeCode);
   const leaveDays = employeeLeaves.filter(row => row.status === "approved").reduce((sum, row) => sum + row.totalDays, 0);
-  return <section className="rounded-[24px] border border-[#d9e2df] bg-[#f8fbf8] p-6 shadow-[0_12px_35px_rgba(43,64,54,0.04)]"><div className="flex flex-col justify-between gap-4 md:flex-row md:items-end"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6f8b80]">EMPLOYEE INSIGHTS</p><h2 className="mt-1 font-display text-xl font-semibold text-[#29443d]">ข้อมูลพนักงานรายบุคคล</h2><p className="mt-1 text-sm text-[#6d8179]">สรุปตามเดือนที่เลือกในปฏิทิน</p></div><select className="h-10 w-full rounded-lg border border-[#dfe8e0] bg-white px-3 text-sm text-[#43685b] outline-none md:w-64" value={employee.id} onChange={event => setEmployeeId(Number(event.target.value))}>{employees.filter(row => row.status === "active").map(row => <option key={row.id} value={row.id}>{row.fullName} · {row.employeeCode}</option>)}</select></div><div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><div className="rounded-2xl bg-white p-4"><p className="text-xs text-[#8b9a92]">อายุงาน</p><p className="mt-2 font-semibold text-[#35554b]">{tenureLabel(employee.createdAt)}</p></div><div className="rounded-2xl bg-white p-4"><p className="text-xs text-[#8b9a92]">วันเริ่มงาน</p><p className="mt-2 font-semibold text-[#35554b]">{displayDate(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date(employee.createdAt)))}</p></div><div className="rounded-2xl bg-white p-4"><p className="text-xs text-[#8b9a92]">พนักงานมาทำงาน</p><p className="mt-2 font-semibold text-[#35554b]">{employeeAttendance.length} วัน</p></div><div className="rounded-2xl bg-white p-4"><p className="text-xs text-[#8b9a92]">วันมาสาย</p><p className="mt-2 font-semibold text-[#b76632]">{employeeAttendance.filter(row => row.lateMinutes > 0).length} วัน</p></div><div className="rounded-2xl bg-white p-4"><p className="text-xs text-[#8b9a92]">วันลาอนุมัติ</p><p className="mt-2 font-semibold text-[#626ca8]">{leaveDays} วัน</p></div></div></section>;
+  return <section className="rounded-[24px] border border-[#d9e2df] bg-[#f8fbf8] p-6 shadow-[0_12px_35px_rgba(43,64,54,0.04)]"><div className="flex flex-col justify-between gap-4 md:flex-row md:items-end"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6f8b80]">EMPLOYEE INSIGHTS</p><h2 className="mt-1 font-display text-xl font-semibold text-[#29443d]">ข้อมูลพนักงานรายบุคคล</h2><p className="mt-1 text-sm text-[#6d8179]">กำหนดช่วงวันที่เพื่อดูสถิติเฉพาะบุคคล</p></div><div className="grid w-full gap-2 sm:grid-cols-2 md:w-auto"><Input type="date" value={startDate} onChange={event => onRangeChange(event.target.value, endDate)} /><Input type="date" value={endDate} onChange={event => onRangeChange(startDate, event.target.value)} /></div></div><div className="mt-4"><select className="h-10 w-full rounded-lg border border-[#dfe8e0] bg-white px-3 text-sm text-[#43685b] outline-none md:w-64" value={employee.id} onChange={event => setEmployeeId(Number(event.target.value))}>{employees.filter(row => row.status === "active").map(row => <option key={row.id} value={row.id}>{row.fullName} · {row.employeeCode}</option>)}</select></div><div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><div className="rounded-2xl bg-white p-4"><p className="text-xs text-[#8b9a92]">อายุงาน</p><p className="mt-2 font-semibold text-[#35554b]">{tenureLabel(new Date(`${employee.startDate}T00:00:00+07:00`).getTime())}</p></div><div className="rounded-2xl bg-white p-4"><p className="text-xs text-[#8b9a92]">วันเริ่มงาน</p><p className="mt-2 font-semibold text-[#35554b]">{displayDate(employee.startDate)}</p></div><div className="rounded-2xl bg-white p-4"><p className="text-xs text-[#8b9a92]">พนักงานมาทำงาน</p><p className="mt-2 font-semibold text-[#35554b]">{employeeAttendance.length} วัน</p></div><div className="rounded-2xl bg-white p-4"><p className="text-xs text-[#8b9a92]">วันมาสาย</p><p className="mt-2 font-semibold text-[#b76632]">{employeeAttendance.filter(row => row.lateMinutes > 0).length} วัน</p></div><div className="rounded-2xl bg-white p-4"><p className="text-xs text-[#8b9a92]">วันลาอนุมัติ</p><p className="mt-2 font-semibold text-[#626ca8]">{leaveDays} วัน</p></div></div></section>;
 }
 
 function EmployeeManagementCard({
@@ -1535,6 +1569,7 @@ function EmployeeManagementCard({
     fullName: string;
     department: string;
     position: string;
+    startDate: string;
   }) => void;
   onDelete: (id: number) => void;
   isPending: boolean;
@@ -1545,6 +1580,7 @@ function EmployeeManagementCard({
     fullName: "",
     department: "",
     position: "",
+    startDate: "",
   });
   const activeEmployees = employees.filter(
     employee => employee.status === "active"
@@ -1556,6 +1592,7 @@ function EmployeeManagementCard({
       fullName: employee.fullName,
       department: employee.department,
       position: employee.position,
+      startDate: employee.startDate,
     });
   };
   return (
@@ -1609,6 +1646,13 @@ function EmployeeManagementCard({
                 }
                 placeholder="ตำแหน่ง"
               />
+              <Input
+                type="date"
+                value={draft.startDate}
+                onChange={event =>
+                  setDraft({ ...draft, startDate: event.target.value })
+                }
+              />
               <div className="flex gap-2 md:col-span-4">
                 <Button
                   disabled={isPending}
@@ -1636,7 +1680,7 @@ function EmployeeManagementCard({
                 </p>
                 <p className="mt-1 text-xs text-[#8b9a92]">
                   {employee.employeeCode} · {employee.department} ·{" "}
-                  {employee.position}
+                  {employee.position} · เริ่มงาน {displayDate(employee.startDate)}
                 </p>
               </div>
               <div className="flex gap-2">
@@ -1828,7 +1872,7 @@ function DeviceBindingCard({
           </h2>
           <p className="mt-2 text-sm leading-6 text-[#6d8179]">
             ระบบจะผูกอุปกรณ์แรกของพนักงานไว้ และปฏิเสธการเช็คอินจากอุปกรณ์อื่น
-            ผู้ดูแลสามารถรีเซ็ตได้เมื่อพนักงานเปลี่ยนเครื่อง
+            ผู้ดูแลสามารถลบอุปกรณ์ที่ผูกไว้ได้เมื่อพนักงานเปลี่ยนเครื่อง
           </p>
         </div>
         <div className="rounded-xl bg-[#f3f8f3] p-3 text-[#4e806f]">
@@ -1855,10 +1899,14 @@ function DeviceBindingCard({
                 size="sm"
                 variant="outline"
                 disabled={!employee.deviceId || isPending}
-                onClick={() => onReset(employee.id)}
+                onClick={() => {
+                  if (window.confirm(`ลบอุปกรณ์ของ ${employee.fullName} หรือไม่?`))
+                    onReset(employee.id);
+                }}
                 className="shrink-0 border-[#dfe8e0] text-xs text-[#4d7166]"
               >
-                รีเซ็ต
+                <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                ลบอุปกรณ์
               </Button>
             </div>
           ))
