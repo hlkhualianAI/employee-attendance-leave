@@ -25,7 +25,21 @@ function requiredEnv(name) {
 }
 function getFirebasePrivateKey() {
   const plain = process.env.FIREBASE_PRIVATE_KEY;
-  if (plain) return plain.trim().replace(/^['"]|['"]$/g, "").replace(/\\n/g, "\n");
+  if (plain) {
+    const normalized = plain.trim().replace(/^['"]|['"]$/g, "").replace(/\\n/g, "\n");
+    const begin = "-----BEGIN PRIVATE KEY-----";
+    const end = "-----END PRIVATE KEY-----";
+    const beginIndex = normalized.indexOf(begin);
+    const endIndex = normalized.indexOf(end);
+    if (beginIndex >= 0 && endIndex > beginIndex) {
+      const body = normalized.slice(beginIndex + begin.length, endIndex).replace(/\s+/g, "");
+      return `${begin}
+${body.match(/.{1,64}/g)?.join("\n") ?? body}
+${end}
+`;
+    }
+    return normalized;
+  }
   const compressed = process.env.FIREBASE_PRIVATE_KEY_GZIP_B64;
   if (compressed) return gunzipSync(Buffer.from(compressed, "base64")).toString("utf8");
   const encoded = process.env.FIREBASE_PRIVATE_KEY_B64;
