@@ -115,12 +115,14 @@ function bangkokDate(date = new Date()) {
 }
 
 function displayDate(date: string) {
+  const parsed = new Date(`${date}T00:00:00+07:00`);
+  if (!date || Number.isNaN(parsed.getTime())) return "ไม่ระบุวันที่";
   return new Intl.DateTimeFormat("th-TH", {
     timeZone: "Asia/Bangkok",
     day: "numeric",
     month: "short",
     year: "numeric",
-  }).format(new Date(`${date}T00:00:00+07:00`));
+  }).format(parsed);
 }
 
 function displayTime(timestamp: number | null | undefined) {

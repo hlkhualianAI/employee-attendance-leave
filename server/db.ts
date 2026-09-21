@@ -20,18 +20,30 @@ export async function getDb() {
 }
 
 function asDate(value: unknown): Date {
-  if (value instanceof Date) return value;
-  if (typeof value === "number" || typeof value === "string")
-    return new Date(value);
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value === "number" || typeof value === "string") {
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
   if (
     value &&
     typeof value === "object" &&
     "toDate" in value &&
     typeof value.toDate === "function"
   ) {
-    return value.toDate();
+    const date = value.toDate();
+    if (date instanceof Date && !Number.isNaN(date.getTime())) return date;
   }
   return new Date();
+}
+
+function asDateString(value: unknown, fallbackTimestamp: number) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+  const date = asDate(value);
+  const timestamp = Number.isNaN(date.getTime()) ? fallbackTimestamp : date.getTime();
+  return bangkokDateFromTimestamp(timestamp);
 }
 
 function asNumber(value: unknown, fallback = 0): number {
@@ -67,9 +79,7 @@ function mapEmployee(data: FirestoreRecord): Employee {
     fullName: String(data.fullName ?? ""),
     department: String(data.department ?? ""),
     position: String(data.position ?? ""),
-    startDate: String(
-      data.startDate ?? bangkokDateFromTimestamp(asNumber(data.createdAt))
-    ),
+    startDate: asDateString(data.startDate, asNumber(data.createdAt, Date.now())),
     workStartMin: asNumber(data.workStartMin, 510),
     workEndMin: asNumber(data.workEndMin, 1050),
     status: (data.status as Employee["status"]) ?? "active",
