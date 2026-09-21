@@ -9,14 +9,27 @@ import "./index.css";
 
 const queryClient = new QueryClient();
 
+const analyticsEndpoint = import.meta.env.VITE_ANALYTICS_ENDPOINT;
+const analyticsWebsiteId = import.meta.env.VITE_ANALYTICS_WEBSITE_ID;
+if (analyticsEndpoint && analyticsWebsiteId) {
+  const script = document.createElement("script");
+  script.defer = true;
+  script.src = `${analyticsEndpoint.replace(/\/$/, "")}/umami`;
+  script.dataset.websiteId = analyticsWebsiteId;
+  document.head.appendChild(script);
+}
+
 const logApiError = (error: unknown) => {
-  if (error instanceof TRPCClientError) console.error("[API Query Error]", error.message);
+  if (error instanceof TRPCClientError)
+    console.error("[API Query Error]", error.message);
 };
 queryClient.getQueryCache().subscribe(event => {
-  if (event.type === "updated" && event.action.type === "error") logApiError(event.query.state.error);
+  if (event.type === "updated" && event.action.type === "error")
+    logApiError(event.query.state.error);
 });
 queryClient.getMutationCache().subscribe(event => {
-  if (event.type === "updated" && event.action.type === "error") logApiError(event.mutation.state.error);
+  if (event.type === "updated" && event.action.type === "error")
+    logApiError(event.mutation.state.error);
 });
 
 const trpcClient = trpc.createClient({
@@ -31,7 +44,10 @@ const trpcClient = trpc.createClient({
         return { Authorization: `Bearer ${token}` };
       },
       fetch(input, init) {
-        return globalThis.fetch(input, { ...(init ?? {}), credentials: "include" });
+        return globalThis.fetch(input, {
+          ...(init ?? {}),
+          credentials: "include",
+        });
       },
     }),
   ],
