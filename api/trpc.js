@@ -1,3 +1,66 @@
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+
+// server/firebase.ts
+var firebase_exports = {};
+__export(firebase_exports, {
+  getFirebaseAuth: () => getFirebaseAuth,
+  getFirebaseProjectId: () => getFirebaseProjectId,
+  getFirestoreDb: () => getFirestoreDb,
+  verifyFirebaseIdToken: () => verifyFirebaseIdToken
+});
+import { cert, getApps, initializeApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+import { getFirestore } from "firebase-admin/firestore";
+function requiredEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required Firebase environment variable: ${name}`);
+  }
+  return value;
+}
+function getFirebaseApp() {
+  const existingApp = getApps()[0];
+  if (existingApp) return existingApp;
+  const projectId = requiredEnv("FIREBASE_PROJECT_ID");
+  const clientEmail = requiredEnv("FIREBASE_CLIENT_EMAIL");
+  const privateKey = requiredEnv("FIREBASE_PRIVATE_KEY").replace(/\\n/g, "\n");
+  return initializeApp({
+    credential: cert({
+      projectId,
+      clientEmail,
+      privateKey
+    })
+  });
+}
+function getFirestoreDb() {
+  firestore ??= getFirestore(getFirebaseApp());
+  return firestore;
+}
+function getFirebaseAuth() {
+  firebaseAuth ??= getAuth(getFirebaseApp());
+  return firebaseAuth;
+}
+function verifyFirebaseIdToken(token) {
+  return getFirebaseAuth().verifyIdToken(token);
+}
+function getFirebaseProjectId() {
+  return requiredEnv("FIREBASE_PROJECT_ID");
+}
+var firestore, firebaseAuth;
+var init_firebase = __esm({
+  "server/firebase.ts"() {
+    "use strict";
+  }
+});
+
 // serverless/trpc.ts
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 
@@ -673,40 +736,6 @@ var appRouter = router({
   })
 });
 
-// server/firebase.ts
-import { cert, getApps, initializeApp } from "firebase-admin/app";
-import { getAuth } from "firebase-admin/auth";
-import { getFirestore } from "firebase-admin/firestore";
-function requiredEnv(name) {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required Firebase environment variable: ${name}`);
-  }
-  return value;
-}
-function getFirebaseApp() {
-  const existingApp = getApps()[0];
-  if (existingApp) return existingApp;
-  const projectId = requiredEnv("FIREBASE_PROJECT_ID");
-  const clientEmail = requiredEnv("FIREBASE_CLIENT_EMAIL");
-  const privateKey = requiredEnv("FIREBASE_PRIVATE_KEY").replace(/\\n/g, "\n");
-  return initializeApp({
-    credential: cert({
-      projectId,
-      clientEmail,
-      privateKey
-    })
-  });
-}
-var firebaseAuth;
-function getFirebaseAuth() {
-  firebaseAuth ??= getAuth(getFirebaseApp());
-  return firebaseAuth;
-}
-function verifyFirebaseIdToken(token) {
-  return getFirebaseAuth().verifyIdToken(token);
-}
-
 // server/_core/context.ts
 var primaryAdminEmail = (process.env.OWNER_EMAIL ?? "songwit.sont@gmail.com").toLowerCase();
 async function createContext(opts) {
@@ -714,7 +743,8 @@ async function createContext(opts) {
   const authHeader = opts.req.headers.authorization;
   if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
     try {
-      const decoded = await verifyFirebaseIdToken(authHeader.slice(7));
+      const { verifyFirebaseIdToken: verifyFirebaseIdToken2 } = await Promise.resolve().then(() => (init_firebase(), firebase_exports));
+      const decoded = await verifyFirebaseIdToken2(authHeader.slice(7));
       const openId = decoded.uid;
       user = await getUserByOpenId(openId) ?? null;
       if (!user) {
