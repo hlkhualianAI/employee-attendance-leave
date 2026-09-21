@@ -459,6 +459,11 @@ async function getRecentAttendance(limit = 8, userId) {
     deviceId: attendance.deviceId
   }).from(attendance).innerJoin(employees, eq(attendance.employeeId, employees.id)).where(userId === void 0 ? void 0 : eq(employees.userId, userId)).orderBy(desc(attendance.updatedAt)).limit(limit);
 }
+async function getAttendanceByMonth(monthPrefix, userId) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({ employeeCode: employees.employeeCode, fullName: employees.fullName, department: employees.department, workDate: attendance.workDate, checkInAt: attendance.checkInAt, checkOutAt: attendance.checkOutAt, lateMinutes: attendance.lateMinutes, checkInMode: attendance.checkInMode, note: attendance.note }).from(attendance).innerJoin(employees, eq(attendance.employeeId, employees.id)).where(userId === void 0 ? like(attendance.workDate, `${monthPrefix}%`) : and(like(attendance.workDate, `${monthPrefix}%`), eq(employees.userId, userId))).orderBy(attendance.workDate, employees.fullName);
+}
 async function getLeaveRequests(limit = 8, userId) {
   const db = await getDb();
   if (!db) return [];
@@ -476,6 +481,11 @@ async function getLeaveRequests(limit = 8, userId) {
     status: leaveRequests.status,
     createdAt: leaveRequests.createdAt
   }).from(leaveRequests).innerJoin(employees, eq(leaveRequests.employeeId, employees.id)).where(userId === void 0 ? void 0 : eq(employees.userId, userId)).orderBy(desc(leaveRequests.createdAt)).limit(limit);
+}
+async function getLeaveRequestsByMonth(monthPrefix, userId) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({ employeeCode: employees.employeeCode, fullName: employees.fullName, department: employees.department, leaveType: leaveRequests.leaveType, startDate: leaveRequests.startDate, endDate: leaveRequests.endDate, totalDays: leaveRequests.totalDays, reason: leaveRequests.reason, status: leaveRequests.status }).from(leaveRequests).innerJoin(employees, eq(leaveRequests.employeeId, employees.id)).where(userId === void 0 ? like(leaveRequests.startDate, `${monthPrefix}%`) : and(like(leaveRequests.startDate, `${monthPrefix}%`), eq(employees.userId, userId))).orderBy(leaveRequests.startDate, employees.fullName);
 }
 async function getDashboardSummary(monthPrefix, userId) {
   const db = await getDb();
@@ -611,6 +621,11 @@ var appRouter = router({
     summary: staffProcedure.input(z2.object({ month: z2.string().regex(/^\d{4}-\d{2}$/) })).query(({ input, ctx }) => getDashboardSummary(input.month, ctx.user.role === "employee" ? ctx.user.id : void 0)),
     recent: staffProcedure.query(({ ctx }) => getRecentAttendance(8, ctx.user.role === "employee" ? ctx.user.id : void 0)),
     byDate: staffProcedure.input(z2.object({ workDate: dateString })).query(({ input, ctx }) => getAttendanceByDate(input.workDate, ctx.user.role === "employee" ? ctx.user.id : void 0)),
+    exportMonth: staffProcedure.input(z2.object({ month: z2.string().regex(/^\d{4}-\d{2}$/) })).query(({ input, ctx }) => Promise.all([
+      getAttendanceByMonth(input.month, ctx.user.role === "employee" ? ctx.user.id : void 0),
+      getLeaveRequestsByMonth(input.month, ctx.user.role === "employee" ? ctx.user.id : void 0),
+      getDashboardSummary(input.month, ctx.user.role === "employee" ? ctx.user.id : void 0)
+    ]).then(([attendanceRows, leaveRows, summary]) => ({ attendance: attendanceRows, leave: leaveRows, summary }))),
     checkIn: staffProcedure.input(z2.object({ employeeId: z2.number().int().positive(), checkInMode: z2.enum(["office", "offsite"]), latitude: z2.number().finite(), longitude: z2.number().finite(), deviceId: z2.string().min(16).max(128), note: z2.string().max(500).optional() })).mutation(async ({ input, ctx }) => {
       await assertEmployeeAccess(input.employeeId, ctx.user.id, ctx.user.role);
       if (!isValidCoordinate(input.latitude, input.longitude)) {

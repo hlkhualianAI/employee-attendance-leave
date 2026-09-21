@@ -11,10 +11,12 @@ import {
   createEmployee,
   createLeaveRequest,
   getAttendanceByDate,
+  getAttendanceByMonth,
   getDashboardSummary,
   getEmployeeByUserId,
   getEmployees,
   getLeaveRequests,
+  getLeaveRequestsByMonth,
   getRecentAttendance,
   getUserById,
   getUsers,
@@ -113,6 +115,11 @@ export const appRouter = router({
     summary: staffProcedure.input(z.object({ month: z.string().regex(/^\d{4}-\d{2}$/) })).query(({ input, ctx }) => getDashboardSummary(input.month, ctx.user.role === "employee" ? ctx.user.id : undefined)),
     recent: staffProcedure.query(({ ctx }) => getRecentAttendance(8, ctx.user.role === "employee" ? ctx.user.id : undefined)),
     byDate: staffProcedure.input(z.object({ workDate: dateString })).query(({ input, ctx }) => getAttendanceByDate(input.workDate, ctx.user.role === "employee" ? ctx.user.id : undefined)),
+    exportMonth: staffProcedure.input(z.object({ month: z.string().regex(/^\d{4}-\d{2}$/) })).query(({ input, ctx }) => Promise.all([
+      getAttendanceByMonth(input.month, ctx.user.role === "employee" ? ctx.user.id : undefined),
+      getLeaveRequestsByMonth(input.month, ctx.user.role === "employee" ? ctx.user.id : undefined),
+      getDashboardSummary(input.month, ctx.user.role === "employee" ? ctx.user.id : undefined),
+    ]).then(([attendanceRows, leaveRows, summary]) => ({ attendance: attendanceRows, leave: leaveRows, summary }))),
     checkIn: staffProcedure
       .input(z.object({ employeeId: z.number().int().positive(), checkInMode: z.enum(["office", "offsite"]), latitude: z.number().finite(), longitude: z.number().finite(), deviceId: z.string().min(16).max(128), note: z.string().max(500).optional() }))
       .mutation(async ({ input, ctx }) => {

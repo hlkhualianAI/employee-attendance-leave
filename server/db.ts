@@ -203,6 +203,15 @@ export async function getRecentAttendance(limit = 8, userId?: number) {
     .limit(limit);
 }
 
+export async function getAttendanceByMonth(monthPrefix: string, userId?: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({ employeeCode: employees.employeeCode, fullName: employees.fullName, department: employees.department, workDate: attendance.workDate, checkInAt: attendance.checkInAt, checkOutAt: attendance.checkOutAt, lateMinutes: attendance.lateMinutes, checkInMode: attendance.checkInMode, note: attendance.note })
+    .from(attendance).innerJoin(employees, eq(attendance.employeeId, employees.id))
+    .where(userId === undefined ? like(attendance.workDate, `${monthPrefix}%`) : and(like(attendance.workDate, `${monthPrefix}%`), eq(employees.userId, userId)))
+    .orderBy(attendance.workDate, employees.fullName);
+}
+
 export async function getLeaveRequests(limit = 8, userId?: number) {
   const db = await getDb();
   if (!db) return [];
@@ -226,6 +235,15 @@ export async function getLeaveRequests(limit = 8, userId?: number) {
     .where(userId === undefined ? undefined : eq(employees.userId, userId))
     .orderBy(desc(leaveRequests.createdAt))
     .limit(limit);
+}
+
+export async function getLeaveRequestsByMonth(monthPrefix: string, userId?: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({ employeeCode: employees.employeeCode, fullName: employees.fullName, department: employees.department, leaveType: leaveRequests.leaveType, startDate: leaveRequests.startDate, endDate: leaveRequests.endDate, totalDays: leaveRequests.totalDays, reason: leaveRequests.reason, status: leaveRequests.status })
+    .from(leaveRequests).innerJoin(employees, eq(leaveRequests.employeeId, employees.id))
+    .where(userId === undefined ? like(leaveRequests.startDate, `${monthPrefix}%`) : and(like(leaveRequests.startDate, `${monthPrefix}%`), eq(employees.userId, userId)))
+    .orderBy(leaveRequests.startDate, employees.fullName);
 }
 
 export async function getDashboardSummary(monthPrefix: string, userId?: number) {

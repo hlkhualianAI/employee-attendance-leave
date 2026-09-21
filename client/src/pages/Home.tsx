@@ -12,6 +12,7 @@ import {
   Check,
   CheckCircle2,
   Clock3,
+  Download,
   Link2,
   LogIn,
   LogOut,
@@ -25,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
 
 type AppRole = "admin" | "hr" | "employee";
 type RoleSelect = AppRole;
@@ -180,6 +182,7 @@ export default function Home() {
   const todayQuery = trpc.attendance.byDate.useQuery({ workDate: today });
   const recentQuery = trpc.attendance.recent.useQuery();
   const leaveQuery = trpc.leave.list.useQuery();
+  const exportQuery = trpc.attendance.exportMonth.useQuery({ month }, { enabled: false });
 
   const createEmployeeMutation = trpc.employees.create.useMutation({
     onSuccess: () => {
@@ -333,6 +336,39 @@ export default function Home() {
     });
   }
 
+  async function exportMonthlyReport() {
+    try {
+      const report = await exportQuery.refetch();
+      if (!report.data) throw new Error("ไม่พบข้อมูลรายงาน");
+      const attendanceRows = report.data.attendance.map(row => ({
+        "รหัสพนักงาน": row.employeeCode, "ชื่อพนักงาน": row.fullName, "แผนก": row.department,
+        "วันที่": row.workDate, "เวลาเข้า": displayTime(row.checkInAt), "เวลาออก": displayTime(row.checkOutAt),
+        "มาสาย (นาที)": row.lateMinutes, "รูปแบบ": row.checkInMode === "offsite" ? "ต่างจังหวัด" : "สำนักงาน", "หมายเหตุ": row.note ?? "",
+      }));
+      const leaveRows = report.data.leave.map(row => ({
+        "รหัสพนักงาน": row.employeeCode, "ชื่อพนักงาน": row.fullName, "แผนก": row.department,
+        "ประเภทการลา": leaveTypeLabels[row.leaveType], "เริ่มวันที่": row.startDate, "ถึงวันที่": row.endDate,
+        "จำนวนวัน": row.totalDays, "สถานะ": statusLabel(row.status).text, "เหตุผล": row.reason ?? "",
+      }));
+      const summaryRows = [
+        { รายการ: "เดือน", ค่า: `${currentMonthLabel} ${month.split("-")[0]}` },
+        { รายการ: "พนักงานที่ใช้งาน", ค่า: report.data.summary.totalEmployees },
+        { รายการ: "วันมาทำงาน", ค่า: report.data.summary.presentDays },
+        { รายการ: "รายการมาสาย", ค่า: report.data.summary.lateDays },
+        { รายการ: "วันลาที่อนุมัติ", ค่า: report.data.summary.approvedLeaveDays },
+        { รายการ: "คำขอลารอตรวจสอบ", ค่า: report.data.summary.pendingLeaves },
+      ];
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summaryRows), "สรุป");
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(attendanceRows), "การเข้างาน");
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(leaveRows), "วันลา");
+      XLSX.writeFile(workbook, `รายงานการทำงาน-${month}.xlsx`);
+      toast.success("ส่งออกไฟล์ Excel เรียบร้อยแล้ว");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "ส่งออกไฟล์ไม่สำเร็จ");
+    }
+  }
+
   return (
     <div className="min-h-[calc(100vh-2rem)] bg-[#f7f8f5] text-[#1f2a2a] -m-4 p-4 md:p-7 lg:p-9">
       <div className="mx-auto max-w-[1500px] space-y-7">
@@ -342,7 +378,7 @@ export default function Home() {
             <div className="flex flex-wrap items-center gap-3"><h1 className="font-display text-3xl font-semibold tracking-tight text-[#1d3330] md:text-4xl">สวัสดี, {user?.name?.split(" ")[0] || "ผู้ใช้งาน"}</h1><span className="inline-flex items-center gap-1.5 rounded-full bg-[#e8f1e9] px-3 py-1 text-xs font-semibold text-[#37705e]"><ShieldCheck className="h-3.5 w-3.5" />{roleLabels[role]}</span></div>
             <p className="mt-2 text-sm text-[#6d7d79]">{roleDescriptions[role]}</p>
           </div>
-          <div className="flex items-center gap-3 text-sm text-[#6d7d79]"><div className="rounded-2xl border border-[#dfe5df] bg-white px-4 py-2.5 shadow-[0_8px_25px_rgba(43,64,54,0.04)]"><span className="mr-2 text-[#9aa9a3]">วันนี้</span><span className="font-semibold text-[#29443d]">{displayDate(today)}</span></div><Button variant="outline" size="icon" className="border-[#dfe5df] bg-white text-[#5d756d]" onClick={() => { void utils.attendance.summary.invalidate(); void utils.attendance.recent.invalidate(); void utils.leave.list.invalidate(); }} aria-label="รีเฟรชข้อมูล"><RefreshCw className="h-4 w-4" /></Button></div>
+          <div className="flex flex-wrap items-center gap-3 text-sm text-[#6d7d79]"><div className="rounded-2xl border border-[#dfe5df] bg-white px-4 py-2.5 shadow-[0_8px_25px_rgba(43,64,54,0.04)]"><span className="mr-2 text-[#9aa9a3]">วันนี้</span><span className="font-semibold text-[#29443d]">{displayDate(today)}</span></div><Button variant="outline" className="border-[#dfe5df] bg-white text-[#5d756d]" onClick={exportMonthlyReport} disabled={exportQuery.isFetching}><Download className="mr-2 h-4 w-4" />{exportQuery.isFetching ? "กำลังสร้าง..." : "Export Excel"}</Button><Button variant="outline" size="icon" className="border-[#dfe5df] bg-white text-[#5d756d]" onClick={() => { void utils.attendance.summary.invalidate(); void utils.attendance.recent.invalidate(); void utils.leave.list.invalidate(); }} aria-label="รีเฟรชข้อมูล"><RefreshCw className="h-4 w-4" /></Button></div>
         </header>
 
         {role === "employee" && !hasLinkedProfile && <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" /><div><p className="font-semibold">บัญชียังไม่ได้ผูกกับโปรไฟล์พนักงาน</p><p className="mt-1 text-xs leading-5">ติดต่อผู้ดูแลระบบหรือฝ่ายบุคคลเพื่อเชื่อมบัญชีของคุณกับข้อมูลพนักงานก่อนใช้งานเช็คอินและวันลา</p></div></div>}
