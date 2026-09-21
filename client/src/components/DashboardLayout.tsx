@@ -19,13 +19,13 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
 import { ClipboardCheck, LogOut, PanelLeft } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
+import FirebaseLogin from "./FirebaseLogin";
 
 const menuItems = [
   { icon: ClipboardCheck, label: "ภาพรวมเวลาทำงาน", path: "/" },
@@ -56,27 +56,7 @@ export default function DashboardLayout({
   }
 
   if (!user) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="flex flex-col items-center gap-8 p-8 max-w-md w-full">
-          <div className="flex flex-col items-center gap-6">
-            <h1 className="text-2xl font-semibold tracking-tight text-center">
-              เข้าสู่ระบบเพื่อใช้งาน
-            </h1>
-            <p className="text-sm text-muted-foreground text-center max-w-sm">
-              ระบบนี้สำหรับผู้ดูแลและทีมงานที่ได้รับอนุญาต กรุณาเข้าสู่ระบบเพื่อดำเนินการต่อ
-            </p>
-          </div>
-          <Button
-            onClick={() => startLogin()}
-            size="lg"
-            className="w-full shadow-lg hover:shadow-xl transition-all"
-          >
-            เข้าสู่ระบบ
-          </Button>
-        </div>
-      </div>
-    );
+    return <FirebaseLogin />;
   }
 
   return (

@@ -1,4 +1,5 @@
 import { cert, getApps, initializeApp, type App } from "firebase-admin/app";
+import { getAuth, type Auth } from "firebase-admin/auth";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
 
 function requiredEnv(name: string): string {
@@ -27,11 +28,21 @@ function getFirebaseApp(): App {
 }
 
 let firestore: Firestore | undefined;
+let firebaseAuth: Auth | undefined;
 
 /** Returns the shared server-side Firestore client. Never import this from client code. */
 export function getFirestoreDb(): Firestore {
   firestore ??= getFirestore(getFirebaseApp());
   return firestore;
+}
+
+export function getFirebaseAuth(): Auth {
+  firebaseAuth ??= getAuth(getFirebaseApp());
+  return firebaseAuth;
+}
+
+export function verifyFirebaseIdToken(token: string) {
+  return getFirebaseAuth().verifyIdToken(token);
 }
 
 export function getFirebaseProjectId(): string {

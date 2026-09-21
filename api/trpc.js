@@ -4,23 +4,8 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 // shared/const.ts
 var COOKIE_NAME = "app_session_id";
 var ONE_YEAR_MS = 1e3 * 60 * 60 * 24 * 365;
-var AXIOS_TIMEOUT_MS = 3e4;
 var UNAUTHED_ERR_MSG = "Please login (10001)";
 var NOT_ADMIN_ERR_MSG = "You do not have required permission (10002)";
-var decodeOAuthState = (state) => {
-  let decoded;
-  try {
-    decoded = atob(state);
-  } catch {
-    return { redirectUri: "" };
-  }
-  try {
-    const parsed = JSON.parse(decoded);
-    if (parsed && typeof parsed.redirectUri === "string") return parsed;
-  } catch {
-  }
-  return { redirectUri: decoded };
-};
 
 // server/routers.ts
 import { TRPCError as TRPCError3 } from "@trpc/server";
@@ -673,276 +658,72 @@ var appRouter = router({
   })
 });
 
-// shared/_core/errors.ts
-var HttpError = class extends Error {
-  constructor(statusCode, message) {
-    super(message);
-    this.statusCode = statusCode;
-    this.name = "HttpError";
+// server/firebase.ts
+import { cert, getApps, initializeApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+import { getFirestore } from "firebase-admin/firestore";
+function requiredEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required Firebase environment variable: ${name}`);
   }
-};
-var ForbiddenError = (msg) => new HttpError(403, msg);
-
-// server/_core/sdk.ts
-import axios from "axios";
-import { parse as parseCookieHeader } from "cookie";
-import { SignJWT, jwtVerify } from "jose";
-var isNonEmptyString2 = (value) => typeof value === "string" && value.length > 0;
-var EXCHANGE_TOKEN_PATH = `/webdev.v1.WebDevAuthPublicService/ExchangeToken`;
-var GET_USER_INFO_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfo`;
-var GET_USER_INFO_WITH_JWT_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfoWithJwt`;
-var OAuthService = class {
-  constructor(client) {
-    this.client = client;
-    console.log("[OAuth] Initialized with baseURL:", ENV.oAuthServerUrl);
-    if (!ENV.oAuthServerUrl) {
-      console.error(
-        "[OAuth] ERROR: OAUTH_SERVER_URL is not configured! Set OAUTH_SERVER_URL environment variable."
-      );
-    }
-  }
-  decodeState(state) {
-    return decodeOAuthState(state).redirectUri;
-  }
-  async getTokenByCode(code, state) {
-    const payload = {
-      clientId: ENV.appId,
-      grantType: "authorization_code",
-      code,
-      redirectUri: this.decodeState(state)
-    };
-    const { data } = await this.client.post(
-      EXCHANGE_TOKEN_PATH,
-      payload
-    );
-    return data;
-  }
-  async getUserInfoByToken(token) {
-    const { data } = await this.client.post(
-      GET_USER_INFO_PATH,
-      {
-        accessToken: token.accessToken
-      }
-    );
-    return data;
-  }
-};
-var createOAuthHttpClient = () => axios.create({
-  baseURL: ENV.oAuthServerUrl,
-  timeout: AXIOS_TIMEOUT_MS
-});
-var SDKServer = class {
-  client;
-  oauthService;
-  constructor(client = createOAuthHttpClient()) {
-    this.client = client;
-    this.oauthService = new OAuthService(this.client);
-  }
-  deriveLoginMethod(platforms, fallback) {
-    if (fallback && fallback.length > 0) return fallback;
-    if (!Array.isArray(platforms) || platforms.length === 0) return null;
-    const set = new Set(
-      platforms.filter((p) => typeof p === "string")
-    );
-    if (set.has("REGISTERED_PLATFORM_EMAIL")) return "email";
-    if (set.has("REGISTERED_PLATFORM_GOOGLE")) return "google";
-    if (set.has("REGISTERED_PLATFORM_APPLE")) return "apple";
-    if (set.has("REGISTERED_PLATFORM_MICROSOFT") || set.has("REGISTERED_PLATFORM_AZURE"))
-      return "microsoft";
-    if (set.has("REGISTERED_PLATFORM_GITHUB")) return "github";
-    const first = Array.from(set)[0];
-    return first ? first.toLowerCase() : null;
-  }
-  /**
-   * Exchange OAuth authorization code for access token
-   * @example
-   * const tokenResponse = await sdk.exchangeCodeForToken(code, state);
-   */
-  async exchangeCodeForToken(code, state) {
-    return this.oauthService.getTokenByCode(code, state);
-  }
-  /**
-   * Get user information using access token
-   * @example
-   * const userInfo = await sdk.getUserInfo(tokenResponse.accessToken);
-   */
-  async getUserInfo(accessToken) {
-    const data = await this.oauthService.getUserInfoByToken({
-      accessToken
-    });
-    const loginMethod = this.deriveLoginMethod(
-      data?.platforms,
-      data?.platform ?? data.platform ?? null
-    );
-    return {
-      ...data,
-      platform: loginMethod,
-      loginMethod
-    };
-  }
-  parseCookies(cookieHeader) {
-    if (!cookieHeader) {
-      return /* @__PURE__ */ new Map();
-    }
-    const parsed = parseCookieHeader(cookieHeader);
-    return new Map(Object.entries(parsed));
-  }
-  getSessionSecret() {
-    const secret = ENV.cookieSecret;
-    return new TextEncoder().encode(secret);
-  }
-  /**
-   * Create a session token for a Manus user openId
-   * @example
-   * const sessionToken = await sdk.createSessionToken(userInfo.openId);
-   */
-  async createSessionToken(openId, options = {}) {
-    return this.signSession(
-      {
-        openId,
-        appId: ENV.appId,
-        name: options.name || ""
-      },
-      options
-    );
-  }
-  async signSession(payload, options = {}) {
-    const issuedAt = Date.now();
-    const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
-    const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1e3);
-    const secretKey = this.getSessionSecret();
-    return new SignJWT({
-      openId: payload.openId,
-      appId: payload.appId,
-      name: payload.name
-    }).setProtectedHeader({ alg: "HS256", typ: "JWT" }).setExpirationTime(expirationSeconds).sign(secretKey);
-  }
-  async verifySession(cookieValue) {
-    if (!cookieValue) {
-      console.warn("[Auth] Missing session cookie");
-      return null;
-    }
-    try {
-      const secretKey = this.getSessionSecret();
-      const { payload } = await jwtVerify(cookieValue, secretKey, {
-        algorithms: ["HS256"]
-      });
-      const { openId, appId, name } = payload;
-      if (!isNonEmptyString2(openId) || !isNonEmptyString2(appId) || !isNonEmptyString2(name)) {
-        console.warn("[Auth] Session payload missing required fields");
-        return null;
-      }
-      return {
-        openId,
-        appId,
-        name
-      };
-    } catch (error) {
-      console.warn("[Auth] Session verification failed", String(error));
-      return null;
-    }
-  }
-  async getUserInfoWithJwt(jwtToken) {
-    const payload = {
-      jwtToken,
-      projectId: ENV.appId
-    };
-    const { data } = await this.client.post(
-      GET_USER_INFO_WITH_JWT_PATH,
-      payload
-    );
-    const loginMethod = this.deriveLoginMethod(
-      data?.platforms,
-      data?.platform ?? data.platform ?? null
-    );
-    return {
-      ...data,
-      platform: loginMethod,
-      loginMethod
-    };
-  }
-  async authenticateRequest(req) {
-    const cookies = this.parseCookies(req.headers.cookie);
-    let sessionToken = cookies.get(COOKIE_NAME);
-    if (!sessionToken) {
-      const authHeader = req.headers.authorization;
-      if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
-        sessionToken = authHeader.slice(7);
-      }
-    }
-    const session = await this.verifySession(sessionToken);
-    if (!session) {
-      throw ForbiddenError("Invalid session cookie");
-    }
-    if (session.openId.startsWith(CRON_OPEN_ID_PREFIX)) {
-      const userInfo = await this.getUserInfoWithJwt(sessionToken ?? "");
-      const taskUid = userInfo.taskUid ?? null;
-      if (!taskUid) {
-        throw ForbiddenError("Cron session missing task_uid");
-      }
-      return buildCronUser(userInfo);
-    }
-    const sessionUserId = session.openId;
-    const signedInAt = /* @__PURE__ */ new Date();
-    let user = await getUserByOpenId(sessionUserId);
-    if (!user) {
-      try {
-        const userInfo = await this.getUserInfoWithJwt(sessionToken ?? "");
-        await upsertUser({
-          openId: userInfo.openId,
-          name: userInfo.name || null,
-          email: userInfo.email ?? null,
-          loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
-          lastSignedIn: signedInAt
-        });
-        user = await getUserByOpenId(userInfo.openId);
-      } catch (error) {
-        console.error("[Auth] Failed to sync user from OAuth:", error);
-        throw ForbiddenError("Failed to sync user info");
-      }
-    }
-    if (!user) {
-      throw ForbiddenError("User not found");
-    }
-    await upsertUser({
-      openId: user.openId,
-      lastSignedIn: signedInAt
-    });
-    return user;
-  }
-};
-var CRON_OPEN_ID_PREFIX = "cron_";
-function buildCronUser(userInfo) {
-  const now = /* @__PURE__ */ new Date();
-  return {
-    id: -1,
-    openId: userInfo.openId,
-    name: userInfo.name || "Manus Scheduled Task",
-    email: null,
-    loginMethod: null,
-    role: "user",
-    createdAt: now,
-    updatedAt: now,
-    lastSignedIn: now,
-    taskUid: userInfo.taskUid ?? void 0,
-    isCron: true
-  };
+  return value;
 }
-var sdk = new SDKServer();
+function getFirebaseApp() {
+  const existingApp = getApps()[0];
+  if (existingApp) return existingApp;
+  const projectId = requiredEnv("FIREBASE_PROJECT_ID");
+  const clientEmail = requiredEnv("FIREBASE_CLIENT_EMAIL");
+  const privateKey = requiredEnv("FIREBASE_PRIVATE_KEY").replace(/\\n/g, "\n");
+  return initializeApp({
+    credential: cert({
+      projectId,
+      clientEmail,
+      privateKey
+    })
+  });
+}
+var firebaseAuth;
+function getFirebaseAuth() {
+  firebaseAuth ??= getAuth(getFirebaseApp());
+  return firebaseAuth;
+}
+function verifyFirebaseIdToken(token) {
+  return getFirebaseAuth().verifyIdToken(token);
+}
 
 // server/_core/context.ts
+var primaryAdminEmail = (process.env.OWNER_EMAIL ?? "songwit.sont@gmail.com").toLowerCase();
 async function createContext(opts) {
   let user = null;
-  try {
-    user = await sdk.authenticateRequest(opts.req);
-  } catch (error) {
-    user = null;
+  const authHeader = opts.req.headers.authorization;
+  if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+    try {
+      const decoded = await verifyFirebaseIdToken(authHeader.slice(7));
+      const openId = decoded.uid;
+      user = await getUserByOpenId(openId) ?? null;
+      if (!user) {
+        const email = decoded.email ?? null;
+        const role = email?.toLowerCase() === primaryAdminEmail ? "admin" : "employee";
+        await upsertUser({
+          openId,
+          name: decoded.name ?? email ?? openId,
+          email,
+          loginMethod: "firebase",
+          role,
+          lastSignedIn: /* @__PURE__ */ new Date()
+        });
+        user = await getUserByOpenId(openId) ?? null;
+        if (!user) {
+          const now = /* @__PURE__ */ new Date();
+          user = { id: 0, openId, name: decoded.name ?? email, email, loginMethod: "firebase", role, createdAt: now, updatedAt: now, lastSignedIn: now };
+        }
+      }
+    } catch (error) {
+      console.warn("[Firebase Auth] Invalid ID token", error);
+    }
   }
-  return {
-    req: opts.req,
-    res: opts.res,
-    user
-  };
+  return { req: opts.req, res: opts.res, user };
 }
 
 // serverless/trpc.ts
