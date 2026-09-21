@@ -1,5 +1,5 @@
 import type { Firestore } from "firebase-admin/firestore";
-import { calculateLateMinutes } from "./attendance.logic";
+import { calculateLateMinutes, countWeekdays } from "./attendance.logic";
 import { getFirestoreDb } from "./firebase";
 import type {
   Attendance,
@@ -564,7 +564,15 @@ export async function getDashboardSummaryByRange(
     lateDays: scopedAttendance.filter(row => row.lateMinutes > 0).length,
     approvedLeaveDays: scopedLeave
       .filter(row => row.status === "approved")
-      .reduce((sum, row) => sum + row.totalDays, 0),
+      .reduce(
+        (sum, row) =>
+          sum +
+          countWeekdays(
+            row.startDate < startDate ? startDate : row.startDate,
+            row.endDate > endDate ? endDate : row.endDate
+          ),
+        0
+      ),
     pendingLeaves: scopedLeave.filter(row => row.status === "pending").length,
   };
 }

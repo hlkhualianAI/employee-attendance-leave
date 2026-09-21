@@ -58,6 +58,21 @@ type EmployeeRow = {
   updatedAt: number;
 };
 
+type ReportAttendanceRow = {
+  employeeCode: string;
+  fullName: string;
+  workDate: string;
+  lateMinutes: number;
+};
+type ReportLeaveRow = {
+  employeeCode: string;
+  fullName: string;
+  startDate: string;
+  endDate: string;
+  totalDays: number;
+  status: string;
+};
+
 const leaveTypeLabels = {
   annual: "ลาพักร้อน",
   sick: "ลาป่วย",
@@ -116,6 +131,22 @@ function displayTime(timestamp: number | null | undefined) {
   }).format(new Date(timestamp));
 }
 
+function tenureLabel(createdAt: number) {
+  const start = new Date(createdAt);
+  const now = new Date();
+  let months =
+    (now.getFullYear() - start.getFullYear()) * 12 +
+    now.getMonth() -
+    start.getMonth();
+  if (now.getDate() < start.getDate()) months -= 1;
+  if (months < 1) return "อายุงานน้อยกว่า 1 เดือน";
+  const years = Math.floor(months / 12);
+  const remainingMonths = months % 12;
+  return years
+    ? `${years} ปี${remainingMonths ? ` ${remainingMonths} เดือน` : ""}`
+    : `${remainingMonths} เดือน`;
+}
+
 function getMonthKey(date = new Date()) {
   const formatted = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Bangkok",
@@ -151,6 +182,12 @@ function calendarDateRange(startDate: string, endDate: string) {
   return days;
 }
 
+function monthEnd(month: string) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  return `${year}-${String(monthNumber).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+}
+
 function countWeekdays(startDate: string, endDate: string) {
   const parseDate = (value: string) => {
     const [year, month, day] = value.split("-").map(Number);
@@ -171,7 +208,7 @@ function countWeekdays(startDate: string, endDate: string) {
     cursor += 86400000
   ) {
     const day = new Date(cursor).getUTCDay();
-    if (day !== 0 && day !== 6) days += 1;
+    if (day !== 0) days += 1;
   }
   return days;
 }
@@ -211,7 +248,7 @@ export default function Home() {
   const month = useMemo(() => getMonthKey(), []);
   const [selectedMonth, setSelectedMonth] = useState(month);
   const [rangeStart, setRangeStart] = useState(`${month}-01`);
-  const [rangeEnd, setRangeEnd] = useState(today);
+  const [rangeEnd, setRangeEnd] = useState(monthEnd(month));
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | "">("");
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
   const [showLeaveForm, setShowLeaveForm] = useState(false);
@@ -237,7 +274,7 @@ export default function Home() {
 
   const utils = trpc.useUtils();
   const employeesQuery = trpc.employees.list.useQuery();
-  const usersQuery = trpc.users.list.useQuery(undefined, { enabled: isAdmin });
+  const usersQuery = trpc.users.list.useQuery(undefined, { enabled: canManage });
   const summaryQuery = trpc.attendance.summary.useQuery({
     month: selectedMonth,
   });
@@ -522,7 +559,7 @@ export default function Home() {
           ค่า: `${displayDate(rangeStart)} - ${displayDate(rangeEnd)}`,
         },
         { รายการ: "พนักงานที่ใช้งาน", ค่า: report.data.summary.totalEmployees },
-        { รายการ: "วันมาทำงาน", ค่า: report.data.summary.presentDays },
+        { รายการ: "พนักงานมาทำงาน", ค่า: report.data.summary.presentDays },
         { รายการ: "รายการมาสาย", ค่า: report.data.summary.lateDays },
         {
           รายการ: "วันลาที่อนุมัติ",
@@ -792,7 +829,7 @@ export default function Home() {
               tone="sage"
             />
             <MetricCard
-              label="วันมาทำงาน"
+              label="พนักงานมาทำงาน"
               value={summary.presentDays}
               suffix="รายการ"
               icon={<CheckCircle2 className="h-5 w-5" />}
@@ -825,32 +862,13 @@ export default function Home() {
                 ภาพรวมการมาทำงานและวันลา
               </h2>
               <p className="mt-1 text-sm text-[#7b8981]">
-                กำหนดช่วงวันที่เพื่อดูวันที่มาสายและช่วงวันที่ลาของแต่ละคนในปฏิทินเดียว
+                กำหนดช่วงวันที่เพื่อดูข้อมูลวันจันทร์–เสาร์ เวลา 08:30–17:30 และวันลาในปฏิทินเดียว
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-3 text-sm font-medium text-[#526b61]">
-              <label className="flex items-center gap-2">
-                เริ่มวันที่
-                <Input
-                  type="date"
-                  value={rangeStart}
-                  onChange={event =>
-                    setRangeStart(event.target.value || `${month}-01`)
-                  }
-                  className="h-10 w-[155px] border-[#dfe8df]"
-                />
-              </label>
-              <label className="flex items-center gap-2">
-                ถึงวันที่
-                <Input
-                  type="date"
-                  value={rangeEnd}
-                  min={rangeStart}
-                  onChange={event => setRangeEnd(event.target.value || today)}
-                  className="h-10 w-[155px] border-[#dfe8df]"
-                />
-              </label>
-            </div>
+            <label className="flex items-center gap-3 text-sm font-medium text-[#526b61]">
+              เลือกเดือน
+              <Input type="month" value={selectedMonth} onChange={event => { const nextMonth = event.target.value || month; setSelectedMonth(nextMonth); setRangeStart(`${nextMonth}-01`); setRangeEnd(monthEnd(nextMonth)); }} className="h-10 w-[165px] border-[#dfe8df]" />
+            </label>
           </div>
           <div className="mt-5 flex flex-wrap gap-3 text-xs text-[#6d7d79]">
             <span className="inline-flex items-center gap-2">
@@ -1454,7 +1472,12 @@ export default function Home() {
             }
           />
         )}
-        {isAdmin && (
+        <EmployeeInsightsCard
+          employees={employees}
+          attendance={reportAttendance as ReportAttendanceRow[]}
+          leaves={reportLeaves as ReportLeaveRow[]}
+        />
+        {canManage && (
           <RoleManagementCard
             users={users}
             employees={employees}
@@ -1479,6 +1502,24 @@ export default function Home() {
       </div>
     </div>
   );
+}
+
+function EmployeeInsightsCard({
+  employees,
+  attendance,
+  leaves,
+}: {
+  employees: EmployeeRow[];
+  attendance: ReportAttendanceRow[];
+  leaves: ReportLeaveRow[];
+}) {
+  const [employeeId, setEmployeeId] = useState<number | "">(employees[0]?.id ?? "");
+  const employee = employees.find(row => row.id === employeeId) ?? employees[0];
+  if (!employee) return null;
+  const employeeAttendance = attendance.filter(row => row.employeeCode === employee.employeeCode);
+  const employeeLeaves = leaves.filter(row => row.employeeCode === employee.employeeCode);
+  const leaveDays = employeeLeaves.filter(row => row.status === "approved").reduce((sum, row) => sum + row.totalDays, 0);
+  return <section className="rounded-[24px] border border-[#d9e2df] bg-[#f8fbf8] p-6 shadow-[0_12px_35px_rgba(43,64,54,0.04)]"><div className="flex flex-col justify-between gap-4 md:flex-row md:items-end"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6f8b80]">EMPLOYEE INSIGHTS</p><h2 className="mt-1 font-display text-xl font-semibold text-[#29443d]">ข้อมูลพนักงานรายบุคคล</h2><p className="mt-1 text-sm text-[#6d8179]">สรุปตามเดือนที่เลือกในปฏิทิน</p></div><select className="h-10 w-full rounded-lg border border-[#dfe8e0] bg-white px-3 text-sm text-[#43685b] outline-none md:w-64" value={employee.id} onChange={event => setEmployeeId(Number(event.target.value))}>{employees.filter(row => row.status === "active").map(row => <option key={row.id} value={row.id}>{row.fullName} · {row.employeeCode}</option>)}</select></div><div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><div className="rounded-2xl bg-white p-4"><p className="text-xs text-[#8b9a92]">อายุงาน</p><p className="mt-2 font-semibold text-[#35554b]">{tenureLabel(employee.createdAt)}</p></div><div className="rounded-2xl bg-white p-4"><p className="text-xs text-[#8b9a92]">วันเริ่มงาน</p><p className="mt-2 font-semibold text-[#35554b]">{displayDate(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date(employee.createdAt)))}</p></div><div className="rounded-2xl bg-white p-4"><p className="text-xs text-[#8b9a92]">พนักงานมาทำงาน</p><p className="mt-2 font-semibold text-[#35554b]">{employeeAttendance.length} วัน</p></div><div className="rounded-2xl bg-white p-4"><p className="text-xs text-[#8b9a92]">วันมาสาย</p><p className="mt-2 font-semibold text-[#b76632]">{employeeAttendance.filter(row => row.lateMinutes > 0).length} วัน</p></div><div className="rounded-2xl bg-white p-4"><p className="text-xs text-[#8b9a92]">วันลาอนุมัติ</p><p className="mt-2 font-semibold text-[#626ca8]">{leaveDays} วัน</p></div></div></section>;
 }
 
 function EmployeeManagementCard({
@@ -1742,12 +1783,7 @@ function RoleManagementCard({
                 onChange={event => setLinkUserId(event.target.value)}
               >
                 <option value="">เลือกบัญชี</option>
-                {users
-                  .filter(
-                    account =>
-                      account.role === "employee" || account.role === "user"
-                  )
-                  .map(account => (
+                {users.map(account => (
                     <option key={account.id} value={account.id}>
                       {account.name || account.email || `User #${account.id}`}
                     </option>
