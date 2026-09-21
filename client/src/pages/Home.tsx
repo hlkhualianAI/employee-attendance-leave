@@ -1511,6 +1511,8 @@ export default function Home() {
           <RoleManagementCard
             users={users}
             employees={employees}
+            usersLoading={usersQuery.isLoading}
+            usersError={usersQuery.error?.message ?? null}
             onRoleChange={(id, nextRole) =>
               updateRoleMutation.mutate({ id, role: nextRole })
             }
@@ -1727,12 +1729,16 @@ function EmployeeManagementCard({
 function RoleManagementCard({
   users,
   employees,
+  usersLoading,
+  usersError,
   onRoleChange,
   onLinkUser,
   isPending,
 }: {
   users: UserRow[];
   employees: EmployeeRow[];
+  usersLoading: boolean;
+  usersError: string | null;
   onRoleChange: (id: number, role: RoleSelect) => void;
   onLinkUser: (employeeId: number, userId: number | null) => void;
   isPending: boolean;
@@ -1765,7 +1771,16 @@ function RoleManagementCard({
             บัญชีผู้ใช้และบทบาท
           </p>
           <div className="space-y-2">
-            {users.length ? (
+            {usersLoading ? (
+              <p className="py-6 text-center text-xs text-[#789288]">
+                กำลังโหลดบัญชีจาก Firebase Authentication…
+              </p>
+            ) : usersError ? (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs leading-5 text-rose-700">
+                <p className="font-semibold">โหลดบัญชีผู้ใช้จาก Firebase ไม่สำเร็จ</p>
+                <p className="mt-1 break-words">{usersError}</p>
+              </div>
+            ) : users.length ? (
               users.map(account => (
                 <div
                   key={account.id}
