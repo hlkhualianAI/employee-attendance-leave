@@ -17,10 +17,20 @@ __export(firebase_exports, {
   verifyFirebaseIdToken: () => verifyFirebaseIdToken
 });
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { gunzipSync } from "node:zlib";
 function requiredEnv(name) {
   const value = process.env[name];
   if (!value) throw new Error(`Missing required Firebase environment variable: ${name}`);
   return value;
+}
+function getFirebasePrivateKey() {
+  const compressed = process.env.FIREBASE_PRIVATE_KEY_GZIP_B64;
+  if (compressed) {
+    return gunzipSync(Buffer.from(compressed, "base64")).toString("utf8");
+  }
+  const encoded = process.env.FIREBASE_PRIVATE_KEY_B64;
+  if (encoded) return Buffer.from(encoded, "base64").toString("utf8");
+  return requiredEnv("FIREBASE_PRIVATE_KEY").replace(/\\n/g, "\n");
 }
 async function getFirebaseApp() {
   const { cert, getApps, initializeApp } = await import("firebase-admin/app");
@@ -30,7 +40,7 @@ async function getFirebaseApp() {
     credential: cert({
       projectId: requiredEnv("FIREBASE_PROJECT_ID"),
       clientEmail: requiredEnv("FIREBASE_CLIENT_EMAIL"),
-      privateKey: requiredEnv("FIREBASE_PRIVATE_KEY").replace(/\\n/g, "\n")
+      privateKey: getFirebasePrivateKey()
     })
   });
 }

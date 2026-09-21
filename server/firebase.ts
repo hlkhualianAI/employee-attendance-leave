@@ -2,6 +2,7 @@ import type { App } from "firebase-admin/app";
 import type { Auth } from "firebase-admin/auth";
 import type { Firestore } from "firebase-admin/firestore";
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { gunzipSync } from "node:zlib";
 
 const firebaseTokenKeys = createRemoteJWKSet(
   new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com")
@@ -13,6 +14,16 @@ function requiredEnv(name: string): string {
   return value;
 }
 
+function getFirebasePrivateKey(): string {
+  const compressed = process.env.FIREBASE_PRIVATE_KEY_GZIP_B64;
+  if (compressed) {
+    return gunzipSync(Buffer.from(compressed, "base64")).toString("utf8");
+  }
+  const encoded = process.env.FIREBASE_PRIVATE_KEY_B64;
+  if (encoded) return Buffer.from(encoded, "base64").toString("utf8");
+  return requiredEnv("FIREBASE_PRIVATE_KEY").replace(/\\n/g, "\n");
+}
+
 async function getFirebaseApp(): Promise<App> {
   const { cert, getApps, initializeApp } = await import("firebase-admin/app");
   const existingApp = getApps()[0];
@@ -22,7 +33,7 @@ async function getFirebaseApp(): Promise<App> {
     credential: cert({
       projectId: requiredEnv("FIREBASE_PROJECT_ID"),
       clientEmail: requiredEnv("FIREBASE_CLIENT_EMAIL"),
-      privateKey: requiredEnv("FIREBASE_PRIVATE_KEY").replace(/\\n/g, "\n"),
+      privateKey: getFirebasePrivateKey(),
     }),
   });
 }
