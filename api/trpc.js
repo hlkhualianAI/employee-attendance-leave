@@ -246,6 +246,21 @@ function getBangkokDate(timestamp2 = Date.now()) {
 function calculateLateMinutes(timestamp2, workStartMin) {
   return Math.max(0, getBangkokMinutes(timestamp2) - workStartMin);
 }
+function countWeekdays(startDate, endDate) {
+  const parseDate = (value) => {
+    const [year, month, day] = value.split("-").map(Number);
+    return new Date(Date.UTC(year, month - 1, day));
+  };
+  const start = parseDate(startDate);
+  const end = parseDate(endDate);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return 0;
+  let days = 0;
+  for (let cursor = start.getTime(); cursor <= end.getTime(); cursor += 864e5) {
+    const day = new Date(cursor).getUTCDay();
+    if (day !== 0 && day !== 6) days += 1;
+  }
+  return days;
+}
 
 // server/db.ts
 var _db = null;
@@ -485,7 +500,10 @@ function roleProcedure(roles) {
   return protectedProcedure.use(({ ctx, next }) => {
     const role = effectiveRole(ctx.user.role);
     if (!roles.includes(role)) {
-      throw new TRPCError2({ code: "FORBIDDEN", message: "\u0E04\u0E38\u0E13\u0E44\u0E21\u0E48\u0E21\u0E35\u0E2A\u0E34\u0E17\u0E18\u0E34\u0E4C\u0E14\u0E33\u0E40\u0E19\u0E34\u0E19\u0E01\u0E32\u0E23\u0E19\u0E35\u0E49" });
+      throw new TRPCError2({
+        code: "FORBIDDEN",
+        message: "\u0E04\u0E38\u0E13\u0E44\u0E21\u0E48\u0E21\u0E35\u0E2A\u0E34\u0E17\u0E18\u0E34\u0E4C\u0E14\u0E33\u0E40\u0E19\u0E34\u0E19\u0E01\u0E32\u0E23\u0E19\u0E35\u0E49"
+      });
     }
     return next({ ctx: { ...ctx, user: { ...ctx.user, role } } });
   });
@@ -497,7 +515,10 @@ async function assertEmployeeAccess(employeeId, userId, role) {
   if (role === "admin" || role === "hr") return;
   const employee = await getEmployeeByUserId(userId);
   if (!employee || employee.id !== employeeId) {
-    throw new TRPCError2({ code: "FORBIDDEN", message: "\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19\u0E17\u0E31\u0E48\u0E27\u0E44\u0E1B\u0E40\u0E02\u0E49\u0E32\u0E16\u0E36\u0E07\u0E44\u0E14\u0E49\u0E40\u0E09\u0E1E\u0E32\u0E30\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E02\u0E2D\u0E07\u0E15\u0E19\u0E40\u0E2D\u0E07" });
+    throw new TRPCError2({
+      code: "FORBIDDEN",
+      message: "\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19\u0E17\u0E31\u0E48\u0E27\u0E44\u0E1B\u0E40\u0E02\u0E49\u0E32\u0E16\u0E36\u0E07\u0E44\u0E14\u0E49\u0E40\u0E09\u0E1E\u0E32\u0E30\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E02\u0E2D\u0E07\u0E15\u0E19\u0E40\u0E2D\u0E07"
+    });
   }
 }
 var appRouter = router({
@@ -510,13 +531,18 @@ var appRouter = router({
     list: adminProcedure2.query(() => getUsers()),
     updateRole: adminProcedure2.input(z2.object({ id: z2.number().int().positive(), role: roleSchema })).mutation(({ input, ctx }) => {
       if (input.id === ctx.user.id && input.role !== "admin") {
-        throw new TRPCError2({ code: "BAD_REQUEST", message: "\u0E44\u0E21\u0E48\u0E2A\u0E32\u0E21\u0E32\u0E23\u0E16\u0E25\u0E14\u0E2A\u0E34\u0E17\u0E18\u0E34\u0E4C\u0E1A\u0E31\u0E0D\u0E0A\u0E35\u0E02\u0E2D\u0E07\u0E15\u0E31\u0E27\u0E40\u0E2D\u0E07\u0E44\u0E14\u0E49" });
+        throw new TRPCError2({
+          code: "BAD_REQUEST",
+          message: "\u0E44\u0E21\u0E48\u0E2A\u0E32\u0E21\u0E32\u0E23\u0E16\u0E25\u0E14\u0E2A\u0E34\u0E17\u0E18\u0E34\u0E4C\u0E1A\u0E31\u0E0D\u0E0A\u0E35\u0E02\u0E2D\u0E07\u0E15\u0E31\u0E27\u0E40\u0E2D\u0E07\u0E44\u0E14\u0E49"
+        });
       }
       return updateUserRole(input.id, input.role);
     })
   }),
   employees: router({
-    list: staffProcedure.query(({ ctx }) => ctx.user.role === "employee" ? getEmployees(ctx.user.id) : getEmployees()),
+    list: staffProcedure.query(
+      ({ ctx }) => ctx.user.role === "employee" ? getEmployees(ctx.user.id) : getEmployees()
+    ),
     create: peopleOpsProcedure.input(
       z2.object({
         employeeCode: z2.string().min(1).max(32),
@@ -528,12 +554,20 @@ var appRouter = router({
         userId: z2.number().int().positive().optional()
       })
     ).mutation(({ input }) => createEmployee(input)),
-    linkUser: peopleOpsProcedure.input(z2.object({ employeeId: z2.number().int().positive(), userId: z2.number().int().positive().nullable() })).mutation(async ({ input }) => {
+    linkUser: peopleOpsProcedure.input(
+      z2.object({
+        employeeId: z2.number().int().positive(),
+        userId: z2.number().int().positive().nullable()
+      })
+    ).mutation(async ({ input }) => {
       if (input.userId !== null) {
         const account = await getUserById(input.userId);
         const accountRole = effectiveRole(account?.role ?? "employee");
         if (accountRole !== "employee") {
-          throw new TRPCError2({ code: "BAD_REQUEST", message: "\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E44\u0E14\u0E49\u0E40\u0E09\u0E1E\u0E32\u0E30\u0E1A\u0E31\u0E0D\u0E0A\u0E35\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19\u0E17\u0E31\u0E48\u0E27\u0E44\u0E1B" });
+          throw new TRPCError2({
+            code: "BAD_REQUEST",
+            message: "\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E44\u0E14\u0E49\u0E40\u0E09\u0E1E\u0E32\u0E30\u0E1A\u0E31\u0E0D\u0E0A\u0E35\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19\u0E17\u0E31\u0E48\u0E27\u0E44\u0E1B"
+          });
         }
       }
       return linkEmployeeUser(input.employeeId, input.userId);
@@ -541,44 +575,123 @@ var appRouter = router({
     resetDevice: peopleOpsProcedure.input(z2.object({ employeeId: z2.number().int().positive() })).mutation(({ input }) => bindEmployeeDevice(input.employeeId, null))
   }),
   attendance: router({
-    summary: staffProcedure.input(z2.object({ month: z2.string().regex(/^\d{4}-\d{2}$/) })).query(({ input, ctx }) => getDashboardSummary(input.month, ctx.user.role === "employee" ? ctx.user.id : void 0)),
-    recent: staffProcedure.query(({ ctx }) => getRecentAttendance(8, ctx.user.role === "employee" ? ctx.user.id : void 0)),
-    byDate: staffProcedure.input(z2.object({ workDate: dateString })).query(({ input, ctx }) => getAttendanceByDate(input.workDate, ctx.user.role === "employee" ? ctx.user.id : void 0)),
-    exportMonth: staffProcedure.input(z2.object({ month: z2.string().regex(/^\d{4}-\d{2}$/) })).query(({ input, ctx }) => Promise.all([
-      getAttendanceByMonth(input.month, ctx.user.role === "employee" ? ctx.user.id : void 0),
-      getLeaveRequestsByMonth(input.month, ctx.user.role === "employee" ? ctx.user.id : void 0),
-      getDashboardSummary(input.month, ctx.user.role === "employee" ? ctx.user.id : void 0)
-    ]).then(([attendanceRows, leaveRows, summary]) => ({ attendance: attendanceRows, leave: leaveRows, summary }))),
-    checkIn: staffProcedure.input(z2.object({ employeeId: z2.number().int().positive(), checkInMode: z2.enum(["office", "offsite"]), latitude: z2.number().finite(), longitude: z2.number().finite(), deviceId: z2.string().min(16).max(128), note: z2.string().max(500).optional() })).mutation(async ({ input, ctx }) => {
-      await assertEmployeeAccess(input.employeeId, ctx.user.id, ctx.user.role);
+    summary: staffProcedure.input(z2.object({ month: z2.string().regex(/^\d{4}-\d{2}$/) })).query(
+      ({ input, ctx }) => getDashboardSummary(
+        input.month,
+        ctx.user.role === "employee" ? ctx.user.id : void 0
+      )
+    ),
+    recent: staffProcedure.query(
+      ({ ctx }) => getRecentAttendance(
+        8,
+        ctx.user.role === "employee" ? ctx.user.id : void 0
+      )
+    ),
+    byDate: staffProcedure.input(z2.object({ workDate: dateString })).query(
+      ({ input, ctx }) => getAttendanceByDate(
+        input.workDate,
+        ctx.user.role === "employee" ? ctx.user.id : void 0
+      )
+    ),
+    exportMonth: staffProcedure.input(z2.object({ month: z2.string().regex(/^\d{4}-\d{2}$/) })).query(
+      ({ input, ctx }) => Promise.all([
+        getAttendanceByMonth(
+          input.month,
+          ctx.user.role === "employee" ? ctx.user.id : void 0
+        ),
+        getLeaveRequestsByMonth(
+          input.month,
+          ctx.user.role === "employee" ? ctx.user.id : void 0
+        ),
+        getDashboardSummary(
+          input.month,
+          ctx.user.role === "employee" ? ctx.user.id : void 0
+        )
+      ]).then(([attendanceRows, leaveRows, summary]) => ({
+        attendance: attendanceRows,
+        leave: leaveRows,
+        summary
+      }))
+    ),
+    checkIn: staffProcedure.input(
+      z2.object({
+        employeeId: z2.number().int().positive(),
+        checkInMode: z2.enum(["office", "offsite"]),
+        latitude: z2.number().finite(),
+        longitude: z2.number().finite(),
+        deviceId: z2.string().min(16).max(128),
+        note: z2.string().max(500).optional()
+      })
+    ).mutation(async ({ input, ctx }) => {
+      await assertEmployeeAccess(
+        input.employeeId,
+        ctx.user.id,
+        ctx.user.role
+      );
       if (!isValidCoordinate(input.latitude, input.longitude)) {
-        throw new TRPCError2({ code: "BAD_REQUEST", message: "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E1E\u0E34\u0E01\u0E31\u0E14 GPS \u0E17\u0E35\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E2D\u0E19\u0E38\u0E0D\u0E32\u0E15\u0E01\u0E32\u0E23\u0E40\u0E02\u0E49\u0E32\u0E16\u0E36\u0E07\u0E15\u0E33\u0E41\u0E2B\u0E19\u0E48\u0E07" });
+        throw new TRPCError2({
+          code: "BAD_REQUEST",
+          message: "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E1E\u0E34\u0E01\u0E31\u0E14 GPS \u0E17\u0E35\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E2D\u0E19\u0E38\u0E0D\u0E32\u0E15\u0E01\u0E32\u0E23\u0E40\u0E02\u0E49\u0E32\u0E16\u0E36\u0E07\u0E15\u0E33\u0E41\u0E2B\u0E19\u0E48\u0E07"
+        });
       }
       if (input.checkInMode === "office") {
-        const geofence = isWithinOfficeGeofence(input.latitude, input.longitude);
+        const geofence = isWithinOfficeGeofence(
+          input.latitude,
+          input.longitude
+        );
         if (!geofence.allowed) {
-          throw new TRPCError2({ code: "FORBIDDEN", message: `\u0E2D\u0E22\u0E39\u0E48\u0E19\u0E2D\u0E01\u0E1E\u0E37\u0E49\u0E19\u0E17\u0E35\u0E48\u0E40\u0E0A\u0E47\u0E04\u0E2D\u0E34\u0E19\u0E2A\u0E33\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19 (\u0E2B\u0E48\u0E32\u0E07\u0E1B\u0E23\u0E30\u0E21\u0E32\u0E13 ${Math.round(geofence.distanceMeters)} \u0E40\u0E21\u0E15\u0E23 / \u0E23\u0E31\u0E28\u0E21\u0E35 ${OFFICE_LOCATION.radiusMeters} \u0E40\u0E21\u0E15\u0E23)` });
+          throw new TRPCError2({
+            code: "FORBIDDEN",
+            message: `\u0E2D\u0E22\u0E39\u0E48\u0E19\u0E2D\u0E01\u0E1E\u0E37\u0E49\u0E19\u0E17\u0E35\u0E48\u0E40\u0E0A\u0E47\u0E04\u0E2D\u0E34\u0E19\u0E2A\u0E33\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19 (\u0E2B\u0E48\u0E32\u0E07\u0E1B\u0E23\u0E30\u0E21\u0E32\u0E13 ${Math.round(geofence.distanceMeters)} \u0E40\u0E21\u0E15\u0E23 / \u0E23\u0E31\u0E28\u0E21\u0E35 ${OFFICE_LOCATION.radiusMeters} \u0E40\u0E21\u0E15\u0E23)`
+          });
         }
       } else if (!input.note?.trim()) {
-        throw new TRPCError2({ code: "BAD_REQUEST", message: "\u0E01\u0E23\u0E38\u0E13\u0E32\u0E23\u0E30\u0E1A\u0E38\u0E40\u0E2B\u0E15\u0E38\u0E1C\u0E25\u0E40\u0E21\u0E37\u0E48\u0E2D\u0E40\u0E25\u0E37\u0E2D\u0E01\u0E17\u0E33\u0E07\u0E32\u0E19\u0E15\u0E48\u0E32\u0E07\u0E08\u0E31\u0E07\u0E2B\u0E27\u0E31\u0E14" });
+        throw new TRPCError2({
+          code: "BAD_REQUEST",
+          message: "\u0E01\u0E23\u0E38\u0E13\u0E32\u0E23\u0E30\u0E1A\u0E38\u0E40\u0E2B\u0E15\u0E38\u0E1C\u0E25\u0E40\u0E21\u0E37\u0E48\u0E2D\u0E40\u0E25\u0E37\u0E2D\u0E01\u0E17\u0E33\u0E07\u0E32\u0E19\u0E15\u0E48\u0E32\u0E07\u0E08\u0E31\u0E07\u0E2B\u0E27\u0E31\u0E14"
+        });
       }
       if (ctx.user.role === "employee") {
         const employee = await getEmployeeByUserId(ctx.user.id);
-        if (!employee) throw new TRPCError2({ code: "FORBIDDEN", message: "\u0E1A\u0E31\u0E0D\u0E0A\u0E35\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E1C\u0E39\u0E01\u0E01\u0E31\u0E1A\u0E42\u0E1B\u0E23\u0E44\u0E1F\u0E25\u0E4C\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19" });
+        if (!employee)
+          throw new TRPCError2({
+            code: "FORBIDDEN",
+            message: "\u0E1A\u0E31\u0E0D\u0E0A\u0E35\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E1C\u0E39\u0E01\u0E01\u0E31\u0E1A\u0E42\u0E1B\u0E23\u0E44\u0E1F\u0E25\u0E4C\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19"
+          });
         if (employee.deviceId && employee.deviceId !== input.deviceId) {
-          throw new TRPCError2({ code: "FORBIDDEN", message: "\u0E2D\u0E38\u0E1B\u0E01\u0E23\u0E13\u0E4C\u0E19\u0E35\u0E49\u0E44\u0E21\u0E48\u0E43\u0E0A\u0E48\u0E2D\u0E38\u0E1B\u0E01\u0E23\u0E13\u0E4C\u0E17\u0E35\u0E48\u0E1C\u0E39\u0E01\u0E01\u0E31\u0E1A\u0E1A\u0E31\u0E0D\u0E0A\u0E35\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19" });
+          throw new TRPCError2({
+            code: "FORBIDDEN",
+            message: "\u0E2D\u0E38\u0E1B\u0E01\u0E23\u0E13\u0E4C\u0E19\u0E35\u0E49\u0E44\u0E21\u0E48\u0E43\u0E0A\u0E48\u0E2D\u0E38\u0E1B\u0E01\u0E23\u0E13\u0E4C\u0E17\u0E35\u0E48\u0E1C\u0E39\u0E01\u0E01\u0E31\u0E1A\u0E1A\u0E31\u0E0D\u0E0A\u0E35\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19"
+          });
         }
-        if (!employee.deviceId) await bindEmployeeDevice(employee.id, input.deviceId);
+        if (!employee.deviceId)
+          await bindEmployeeDevice(employee.id, input.deviceId);
       }
-      return checkInEmployee(input.employeeId, getBangkokDate(), Date.now(), { checkInMode: input.checkInMode, latitude: input.latitude, longitude: input.longitude, deviceId: input.deviceId, recordedByUserId: ctx.user.id, note: input.note?.trim() || void 0 });
+      return checkInEmployee(input.employeeId, getBangkokDate(), Date.now(), {
+        checkInMode: input.checkInMode,
+        latitude: input.latitude,
+        longitude: input.longitude,
+        deviceId: input.deviceId,
+        recordedByUserId: ctx.user.id,
+        note: input.note?.trim() || void 0
+      });
     }),
     checkOut: staffProcedure.input(z2.object({ employeeId: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
-      await assertEmployeeAccess(input.employeeId, ctx.user.id, ctx.user.role);
+      await assertEmployeeAccess(
+        input.employeeId,
+        ctx.user.id,
+        ctx.user.role
+      );
       return checkOutEmployee(input.employeeId, getBangkokDate(), Date.now());
     })
   }),
   leave: router({
-    list: staffProcedure.query(({ ctx }) => getLeaveRequests(8, ctx.user.role === "employee" ? ctx.user.id : void 0)),
+    list: staffProcedure.query(
+      ({ ctx }) => getLeaveRequests(
+        8,
+        ctx.user.role === "employee" ? ctx.user.id : void 0
+      )
+    ),
     create: staffProcedure.input(
       z2.object({
         employeeId: z2.number().int().positive(),
@@ -589,10 +702,26 @@ var appRouter = router({
         reason: z2.string().max(1e3).optional()
       })
     ).mutation(async ({ input, ctx }) => {
-      await assertEmployeeAccess(input.employeeId, ctx.user.id, ctx.user.role);
-      return createLeaveRequest(input);
+      await assertEmployeeAccess(
+        input.employeeId,
+        ctx.user.id,
+        ctx.user.role
+      );
+      const calculatedDays = countWeekdays(input.startDate, input.endDate);
+      if (calculatedDays < 1 || input.totalDays !== calculatedDays) {
+        throw new TRPCError2({
+          code: "BAD_REQUEST",
+          message: "\u0E08\u0E33\u0E19\u0E27\u0E19\u0E27\u0E31\u0E19\u0E25\u0E32\u0E2B\u0E23\u0E37\u0E2D\u0E0A\u0E48\u0E27\u0E07\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07"
+        });
+      }
+      return createLeaveRequest({ ...input, totalDays: calculatedDays });
     }),
-    updateStatus: peopleOpsProcedure.input(z2.object({ id: z2.number().int().positive(), status: z2.enum(["pending", "approved", "rejected"]) })).mutation(({ input }) => updateLeaveStatus(input.id, input.status))
+    updateStatus: peopleOpsProcedure.input(
+      z2.object({
+        id: z2.number().int().positive(),
+        status: z2.enum(["pending", "approved", "rejected"])
+      })
+    ).mutation(({ input }) => updateLeaveStatus(input.id, input.status))
   })
 });
 
@@ -606,23 +735,27 @@ async function createContext(opts) {
       const { verifyFirebaseIdToken: verifyFirebaseIdToken2 } = await Promise.resolve().then(() => (init_firebase(), firebase_exports));
       const decoded = await verifyFirebaseIdToken2(authHeader.slice(7));
       const openId = decoded.uid;
-      user = await getUserByOpenId(openId) ?? null;
-      if (!user) {
-        const email = decoded.email ?? null;
-        const role = email?.toLowerCase() === primaryAdminEmail ? "admin" : "employee";
-        await upsertUser({
-          openId,
-          name: decoded.name ?? email ?? openId,
-          email,
-          loginMethod: "firebase",
-          role,
-          lastSignedIn: /* @__PURE__ */ new Date()
-        });
+      const email = decoded.email ?? null;
+      const role = email?.toLowerCase() === primaryAdminEmail ? "admin" : "employee";
+      try {
         user = await getUserByOpenId(openId) ?? null;
         if (!user) {
-          const now = /* @__PURE__ */ new Date();
-          user = { id: 0, openId, name: decoded.name ?? email, email, loginMethod: "firebase", role, createdAt: now, updatedAt: now, lastSignedIn: now };
+          await upsertUser({
+            openId,
+            name: decoded.name ?? email ?? openId,
+            email,
+            loginMethod: "firebase",
+            role,
+            lastSignedIn: /* @__PURE__ */ new Date()
+          });
+          user = await getUserByOpenId(openId) ?? null;
         }
+      } catch (error) {
+        console.warn("[Database] Failed to synchronize Firebase user:", error);
+      }
+      if (!user) {
+        const now = /* @__PURE__ */ new Date();
+        user = { id: 0, openId, name: decoded.name ?? email, email, loginMethod: "firebase", role, createdAt: now, updatedAt: now, lastSignedIn: now };
       }
     } catch (error) {
       console.warn("[Firebase Auth] Invalid ID token", error);
