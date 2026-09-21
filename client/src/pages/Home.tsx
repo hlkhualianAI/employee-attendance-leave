@@ -19,8 +19,10 @@ import {
   Navigation,
   Plane,
   Plus,
+  Pencil,
   RefreshCw,
   ShieldCheck,
+  Trash2,
   UserRoundCog,
   Users,
   X,
@@ -123,19 +125,28 @@ function getMonthKey(date = new Date()) {
   return formatted.replace("/", "-");
 }
 
-function calendarDateRange(month: string) {
-  const [year, monthNumber] = month.split("-").map(Number);
-  const first = new Date(Date.UTC(year, monthNumber - 1, 1));
-  const last = new Date(Date.UTC(year, monthNumber, 0));
+function calendarDateRange(startDate: string, endDate: string) {
+  const [year, monthNumber, dayNumber] = startDate.split("-").map(Number);
+  const [endYear, endMonthNumber, endDayNumber] = endDate
+    .split("-")
+    .map(Number);
+  const first = new Date(Date.UTC(year, monthNumber - 1, dayNumber));
+  const last = new Date(Date.UTC(endYear, endMonthNumber - 1, endDayNumber));
   const startOffset = (first.getUTCDay() + 6) % 7;
-  const days = Array.from(
-    { length: startOffset + last.getUTCDate() },
-    (_, index) => {
-      if (index < startOffset) return null;
-      const day = index - startOffset + 1;
-      return `${year}-${String(monthNumber).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    }
+  const days: Array<string | null> = Array.from(
+    { length: startOffset },
+    () => null
   );
+  for (
+    let cursor = first.getTime();
+    cursor <= last.getTime();
+    cursor += 86400000
+  ) {
+    const current = new Date(cursor);
+    days.push(
+      `${current.getUTCFullYear()}-${String(current.getUTCMonth() + 1).padStart(2, "0")}-${String(current.getUTCDate()).padStart(2, "0")}`
+    );
+  }
   while (days.length % 7 !== 0) days.push(null);
   return days;
 }
@@ -199,6 +210,8 @@ export default function Home() {
   const today = useMemo(() => bangkokDate(), []);
   const month = useMemo(() => getMonthKey(), []);
   const [selectedMonth, setSelectedMonth] = useState(month);
+  const [rangeStart, setRangeStart] = useState(`${month}-01`);
+  const [rangeEnd, setRangeEnd] = useState(today);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | "">("");
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
   const [showLeaveForm, setShowLeaveForm] = useState(false);
@@ -231,11 +244,12 @@ export default function Home() {
   const todayQuery = trpc.attendance.byDate.useQuery({ workDate: today });
   const recentQuery = trpc.attendance.recent.useQuery();
   const leaveQuery = trpc.leave.list.useQuery();
-  const reportQuery = trpc.attendance.exportMonth.useQuery({
-    month: selectedMonth,
+  const reportQuery = trpc.attendance.reportRange.useQuery({
+    startDate: rangeStart,
+    endDate: rangeEnd,
   });
-  const exportQuery = trpc.attendance.exportMonth.useQuery(
-    { month: selectedMonth },
+  const exportQuery = trpc.attendance.reportRange.useQuery(
+    { startDate: rangeStart, endDate: rangeEnd },
     { enabled: false }
   );
 
@@ -253,6 +267,23 @@ export default function Home() {
       void utils.attendance.summary.invalidate();
     },
     onError: error => toast.error(error.message || "เพิ่มพนักงานไม่สำเร็จ"),
+  });
+
+  const updateEmployeeMutation = trpc.employees.update.useMutation({
+    onSuccess: () => {
+      toast.success("แก้ไขข้อมูลพนักงานแล้ว");
+      void utils.employees.list.invalidate();
+    },
+    onError: error => toast.error(error.message || "แก้ไขข้อมูลไม่สำเร็จ"),
+  });
+
+  const deleteEmployeeMutation = trpc.employees.delete.useMutation({
+    onSuccess: () => {
+      toast.success("ลบพนักงานออกจากรายชื่อใช้งานแล้ว");
+      void utils.employees.list.invalidate();
+      void utils.attendance.summary.invalidate();
+    },
+    onError: error => toast.error(error.message || "ลบพนักงานไม่สำเร็จ"),
   });
 
   const checkInMutation = trpc.attendance.checkIn.useMutation({
@@ -361,16 +392,17 @@ export default function Home() {
   const todayAttendance = (todayQuery.data ?? []).find(
     item => item.employeeId === activeEmployeeId
   );
-  const summary = summaryQuery.data ?? {
-    totalEmployees: 0,
-    presentDays: 0,
-    lateDays: 0,
-    approvedLeaveDays: 0,
-    pendingLeaves: 0,
-  };
+  const summary = reportQuery.data?.summary ??
+    summaryQuery.data ?? {
+      totalEmployees: 0,
+      presentDays: 0,
+      lateDays: 0,
+      approvedLeaveDays: 0,
+      pendingLeaves: 0,
+    };
   const calendarDays = useMemo(
-    () => calendarDateRange(selectedMonth),
-    [selectedMonth]
+    () => calendarDateRange(rangeStart, rangeEnd),
+    [rangeStart, rangeEnd]
   );
   const reportAttendance = reportQuery.data?.attendance ?? [];
   const reportLeaves = reportQuery.data?.leave ?? [];
@@ -487,7 +519,7 @@ export default function Home() {
       const summaryRows = [
         {
           รายการ: "เดือน",
-          ค่า: `${currentMonthLabel} ${selectedMonth.split("-")[0]}`,
+          ค่า: `${displayDate(rangeStart)} - ${displayDate(rangeEnd)}`,
         },
         { รายการ: "พนักงานที่ใช้งาน", ค่า: report.data.summary.totalEmployees },
         { รายการ: "วันมาทำงาน", ค่า: report.data.summary.presentDays },
@@ -498,7 +530,7 @@ export default function Home() {
         },
         { รายการ: "คำขอลารอตรวจสอบ", ค่า: report.data.summary.pendingLeaves },
       ];
-      const dailyRows = calendarDateRange(selectedMonth)
+      const dailyRows = calendarDateRange(rangeStart, rangeEnd)
         .filter(Boolean)
         .map(date => {
           const attendance = report.data.attendance.filter(
@@ -549,7 +581,7 @@ export default function Home() {
         XLSX.utils.json_to_sheet(dailyRows),
         "สรุปรายวัน"
       );
-      XLSX.writeFile(workbook, `รายงานการทำงาน-${selectedMonth}.xlsx`);
+      XLSX.writeFile(workbook, `รายงานการทำงาน-${rangeStart}-${rangeEnd}.xlsx`);
       toast.success("ส่งออกไฟล์ Excel เรียบร้อยแล้ว");
     } catch (error) {
       toast.error(
@@ -793,20 +825,32 @@ export default function Home() {
                 ภาพรวมการมาทำงานและวันลา
               </h2>
               <p className="mt-1 text-sm text-[#7b8981]">
-                เลือกเดือนเพื่อดูวันที่มาสายและช่วงวันที่ลาของแต่ละคนในปฏิทินเดียว
+                กำหนดช่วงวันที่เพื่อดูวันที่มาสายและช่วงวันที่ลาของแต่ละคนในปฏิทินเดียว
               </p>
             </div>
-            <label className="flex items-center gap-3 text-sm font-medium text-[#526b61]">
-              เลือกเดือน
-              <Input
-                type="month"
-                value={selectedMonth}
-                onChange={event =>
-                  setSelectedMonth(event.target.value || month)
-                }
-                className="h-10 w-[165px] border-[#dfe8df]"
-              />
-            </label>
+            <div className="flex flex-wrap items-center gap-3 text-sm font-medium text-[#526b61]">
+              <label className="flex items-center gap-2">
+                เริ่มวันที่
+                <Input
+                  type="date"
+                  value={rangeStart}
+                  onChange={event =>
+                    setRangeStart(event.target.value || `${month}-01`)
+                  }
+                  className="h-10 w-[155px] border-[#dfe8df]"
+                />
+              </label>
+              <label className="flex items-center gap-2">
+                ถึงวันที่
+                <Input
+                  type="date"
+                  value={rangeEnd}
+                  min={rangeStart}
+                  onChange={event => setRangeEnd(event.target.value || today)}
+                  className="h-10 w-[155px] border-[#dfe8df]"
+                />
+              </label>
+            </div>
           </div>
           <div className="mt-5 flex flex-wrap gap-3 text-xs text-[#6d7d79]">
             <span className="inline-flex items-center gap-2">
@@ -1399,6 +1443,17 @@ export default function Home() {
           )}
         </section>
 
+        {canManage && (
+          <EmployeeManagementCard
+            employees={employees}
+            onUpdate={input => updateEmployeeMutation.mutate(input)}
+            onDelete={id => deleteEmployeeMutation.mutate({ id })}
+            isPending={
+              updateEmployeeMutation.isPending ||
+              deleteEmployeeMutation.isPending
+            }
+          />
+        )}
         {isAdmin && (
           <RoleManagementCard
             users={users}
@@ -1423,6 +1478,162 @@ export default function Home() {
         )}
       </div>
     </div>
+  );
+}
+
+function EmployeeManagementCard({
+  employees,
+  onUpdate,
+  onDelete,
+  isPending,
+}: {
+  employees: EmployeeRow[];
+  onUpdate: (input: {
+    id: number;
+    employeeCode: string;
+    fullName: string;
+    department: string;
+    position: string;
+  }) => void;
+  onDelete: (id: number) => void;
+  isPending: boolean;
+}) {
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [draft, setDraft] = useState({
+    employeeCode: "",
+    fullName: "",
+    department: "",
+    position: "",
+  });
+  const activeEmployees = employees.filter(
+    employee => employee.status === "active"
+  );
+  const startEdit = (employee: EmployeeRow) => {
+    setEditingId(employee.id);
+    setDraft({
+      employeeCode: employee.employeeCode,
+      fullName: employee.fullName,
+      department: employee.department,
+      position: employee.position,
+    });
+  };
+  return (
+    <section className="rounded-[24px] border border-[#d9e2df] bg-white p-6 shadow-[0_12px_35px_rgba(43,64,54,0.04)]">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6f8b80]">
+            EMPLOYEE DIRECTORY
+          </p>
+          <h2 className="mt-1 font-display text-xl font-semibold text-[#29443d]">
+            แก้ไขและลบพนักงาน
+          </h2>
+          <p className="mt-2 text-sm text-[#6d8179]">
+            การลบจะปิดสถานะการใช้งานและเก็บประวัติการลงเวลาเดิมไว้
+          </p>
+        </div>
+        <Users className="h-5 w-5 text-[#4e806f]" />
+      </div>
+      <div className="mt-5 space-y-3">
+        {activeEmployees.map(employee =>
+          editingId === employee.id ? (
+            <div
+              key={employee.id}
+              className="grid gap-3 rounded-2xl border border-[#dce8de] bg-[#f8fbf8] p-4 md:grid-cols-4"
+            >
+              <Input
+                value={draft.employeeCode}
+                onChange={event =>
+                  setDraft({ ...draft, employeeCode: event.target.value })
+                }
+                placeholder="รหัสพนักงาน"
+              />
+              <Input
+                value={draft.fullName}
+                onChange={event =>
+                  setDraft({ ...draft, fullName: event.target.value })
+                }
+                placeholder="ชื่อ-นามสกุล"
+              />
+              <Input
+                value={draft.department}
+                onChange={event =>
+                  setDraft({ ...draft, department: event.target.value })
+                }
+                placeholder="แผนก"
+              />
+              <Input
+                value={draft.position}
+                onChange={event =>
+                  setDraft({ ...draft, position: event.target.value })
+                }
+                placeholder="ตำแหน่ง"
+              />
+              <div className="flex gap-2 md:col-span-4">
+                <Button
+                  disabled={isPending}
+                  className="bg-[#2f7564] hover:bg-[#276355]"
+                  onClick={() => {
+                    onUpdate({ id: employee.id, ...draft });
+                    setEditingId(null);
+                  }}
+                >
+                  บันทึก
+                </Button>
+                <Button variant="outline" onClick={() => setEditingId(null)}>
+                  ยกเลิก
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div
+              key={employee.id}
+              className="flex flex-col gap-3 rounded-2xl border border-[#edf1ed] p-4 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div>
+                <p className="font-semibold text-[#35554b]">
+                  {employee.fullName}
+                </p>
+                <p className="mt-1 text-xs text-[#8b9a92]">
+                  {employee.employeeCode} · {employee.department} ·{" "}
+                  {employee.position}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-[#cfe0d5] text-[#477461]"
+                  onClick={() => startEdit(employee)}
+                >
+                  <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                  แก้ไข
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-[#efd9d5] text-[#bd6b63] hover:bg-[#fff4f2]"
+                  disabled={isPending}
+                  onClick={() => {
+                    if (
+                      window.confirm(`ยืนยันลบ ${employee.fullName} หรือไม่?`)
+                    )
+                      onDelete(employee.id);
+                  }}
+                >
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                  ลบ
+                </Button>
+              </div>
+            </div>
+          )
+        )}
+        {!activeEmployees.length && (
+          <p className="rounded-2xl bg-[#f7faf7] p-4 text-sm text-[#81918a]">
+            ยังไม่มีพนักงานที่ใช้งานอยู่
+          </p>
+        )}
+      </div>
+    </section>
   );
 }
 

@@ -11,20 +11,25 @@ import {
   checkInEmployee,
   checkOutEmployee,
   createEmployee,
+  deleteEmployee,
   createLeaveRequest,
   getAttendanceByDate,
   getAttendanceByMonth,
+  getAttendanceByRange,
   getDashboardSummary,
+  getDashboardSummaryByRange,
   getEmployeeByUserId,
   getEmployees,
   getLeaveRequests,
   getLeaveRequestsByMonth,
+  getLeaveRequestsByRange,
   getRecentAttendance,
   getUserById,
   getUsers,
   bindEmployeeDevice,
   linkEmployeeUser,
   updateLeaveStatus,
+  updateEmployee,
   updateUserRole,
 } from "./db";
 import { countWeekdays, getBangkokDate } from "./attendance.logic";
@@ -110,6 +115,22 @@ export const appRouter = router({
         })
       )
       .mutation(({ input }) => createEmployee(input)),
+    update: peopleOpsProcedure
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          employeeCode: z.string().min(1).max(32),
+          fullName: z.string().min(1).max(160),
+          department: z.string().min(1).max(120),
+          position: z.string().min(1).max(120),
+          workStartMin: z.number().int().min(0).max(1439).optional(),
+          workEndMin: z.number().int().min(0).max(1439).optional(),
+        })
+      )
+      .mutation(({ input }) => updateEmployee(input)),
+    delete: peopleOpsProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(({ input }) => deleteEmployee(input.id)),
     linkUser: peopleOpsProcedure
       .input(
         z.object({
@@ -179,6 +200,25 @@ export const appRouter = router({
           summary,
         }))
       ),
+    reportRange: staffProcedure
+      .input(z.object({ startDate: dateString, endDate: dateString }))
+      .query(({ input, ctx }) => {
+        if (input.startDate > input.endDate)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "ช่วงวันที่ไม่ถูกต้อง",
+          });
+        const userId = ctx.user.role === "employee" ? ctx.user.id : undefined;
+        return Promise.all([
+          getAttendanceByRange(input.startDate, input.endDate, userId),
+          getLeaveRequestsByRange(input.startDate, input.endDate, userId),
+          getDashboardSummaryByRange(input.startDate, input.endDate, userId),
+        ]).then(([attendance, leave, summary]) => ({
+          attendance,
+          leave,
+          summary,
+        }));
+      }),
     checkIn: staffProcedure
       .input(
         z.object({

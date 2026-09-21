@@ -228,7 +228,8 @@ async function getDb() {
 }
 function asDate(value) {
   if (value instanceof Date) return value;
-  if (typeof value === "number" || typeof value === "string") return new Date(value);
+  if (typeof value === "number" || typeof value === "string")
+    return new Date(value);
   if (value && typeof value === "object" && "toDate" in value && typeof value.toDate === "function") {
     return value.toDate();
   }
@@ -338,7 +339,13 @@ async function getUserByOpenId(openId) {
   return snapshot.docs[0] ? mapUser(snapshot.docs[0].data()) : void 0;
 }
 async function getUsers() {
-  return (await records("users")).map(mapUser).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")).map((user) => ({ id: user.id, name: user.name, email: user.email, role: user.role, lastSignedIn: user.lastSignedIn }));
+  return (await records("users")).map(mapUser).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")).map((user) => ({
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    lastSignedIn: user.lastSignedIn
+  }));
 }
 async function getUserById(id) {
   const snapshot = await (await getDb()).collection("users").where("id", "==", id).limit(1).get();
@@ -351,7 +358,9 @@ async function updateUserRole(id, role) {
   return { id, role };
 }
 async function getEmployees(userId) {
-  return (await records("employees")).map(mapEmployee).filter((employee) => userId === void 0 || employee.userId === userId).sort((a, b) => a.status.localeCompare(b.status) || a.fullName.localeCompare(b.fullName));
+  return (await records("employees")).map(mapEmployee).filter((employee) => userId === void 0 || employee.userId === userId).sort(
+    (a, b) => a.status.localeCompare(b.status) || a.fullName.localeCompare(b.fullName)
+  );
 }
 async function getEmployeeByUserId(userId) {
   const employee = (await getEmployees(userId))[0];
@@ -380,6 +389,30 @@ async function createEmployee(input) {
   await db.collection("employees").doc(String(id)).set(employee);
   return mapEmployee(employee);
 }
+async function updateEmployee(input) {
+  const ref = await employeeRef(input.id);
+  if (!ref) throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19");
+  if (input.employeeCode) {
+    const duplicate = await (await getDb()).collection("employees").where("employeeCode", "==", input.employeeCode).limit(2).get();
+    if (duplicate.docs.some((doc) => doc.ref.path !== ref.path))
+      throw new Error("\u0E23\u0E2B\u0E31\u0E2A\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19\u0E19\u0E35\u0E49\u0E16\u0E39\u0E01\u0E43\u0E0A\u0E49\u0E07\u0E32\u0E19\u0E41\u0E25\u0E49\u0E27");
+  }
+  const { id: _id, ...changes } = input;
+  await ref.update({ ...changes, updatedAt: Date.now() });
+  const updated = await ref.get();
+  return mapEmployee(updated.data());
+}
+async function deleteEmployee(id) {
+  const ref = await employeeRef(id);
+  if (!ref) throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19");
+  await ref.update({
+    status: "inactive",
+    userId: null,
+    deviceId: null,
+    updatedAt: Date.now()
+  });
+  return { id, status: "inactive" };
+}
 async function employeeRef(employeeId) {
   const snapshot = await (await getDb()).collection("employees").where("id", "==", employeeId).limit(1).get();
   return snapshot.docs[0]?.ref;
@@ -397,42 +430,159 @@ async function bindEmployeeDevice(employeeId, deviceId) {
   return { employeeId, deviceId };
 }
 function joinAttendance(row, employee) {
-  return { ...row, employee, employeeCode: employee.employeeCode, fullName: employee.fullName, department: employee.department };
+  return {
+    ...row,
+    employee,
+    employeeCode: employee.employeeCode,
+    fullName: employee.fullName,
+    department: employee.department
+  };
 }
 async function attendanceWithEmployees() {
-  const [attendanceRows, employeeRows] = await Promise.all([records("attendance"), records("employees")]);
-  const employeeMap = new Map(employeeRows.map((row) => [asNumber(row.id), mapEmployee(row)]));
+  const [attendanceRows, employeeRows] = await Promise.all([
+    records("attendance"),
+    records("employees")
+  ]);
+  const employeeMap = new Map(
+    employeeRows.map((row) => [asNumber(row.id), mapEmployee(row)])
+  );
   return attendanceRows.map(mapAttendance).map((row) => ({ row, employee: employeeMap.get(row.employeeId) })).filter((item) => item.employee).map((item) => joinAttendance(item.row, item.employee));
 }
 async function getAttendanceByDate(workDate, userId) {
-  return (await attendanceWithEmployees()).filter((row) => row.workDate === workDate && (userId === void 0 || row.employee.userId === userId)).sort((a, b) => (b.checkInAt ?? 0) - (a.checkInAt ?? 0)).map(({ employee, ...row }) => row);
+  return (await attendanceWithEmployees()).filter(
+    (row) => row.workDate === workDate && (userId === void 0 || row.employee.userId === userId)
+  ).sort((a, b) => (b.checkInAt ?? 0) - (a.checkInAt ?? 0)).map(({ employee, ...row }) => row);
 }
 async function getRecentAttendance(limit = 8, userId) {
   return (await attendanceWithEmployees()).filter((row) => userId === void 0 || row.employee.userId === userId).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit).map(({ employee, ...row }) => row);
 }
 async function getAttendanceByMonth(monthPrefix, userId) {
-  return (await attendanceWithEmployees()).filter((row) => row.workDate.startsWith(monthPrefix) && (userId === void 0 || row.employee.userId === userId)).sort((a, b) => a.workDate.localeCompare(b.workDate) || a.fullName.localeCompare(b.fullName)).map((row) => ({ employeeCode: row.employeeCode, fullName: row.fullName, department: row.department, workDate: row.workDate, checkInAt: row.checkInAt, checkOutAt: row.checkOutAt, lateMinutes: row.lateMinutes, checkInMode: row.checkInMode, note: row.note }));
+  return (await attendanceWithEmployees()).filter(
+    (row) => row.workDate.startsWith(monthPrefix) && (userId === void 0 || row.employee.userId === userId)
+  ).sort(
+    (a, b) => a.workDate.localeCompare(b.workDate) || a.fullName.localeCompare(b.fullName)
+  ).map((row) => ({
+    employeeCode: row.employeeCode,
+    fullName: row.fullName,
+    department: row.department,
+    workDate: row.workDate,
+    checkInAt: row.checkInAt,
+    checkOutAt: row.checkOutAt,
+    lateMinutes: row.lateMinutes,
+    checkInMode: row.checkInMode,
+    note: row.note
+  }));
+}
+async function getAttendanceByRange(startDate, endDate, userId) {
+  return (await attendanceWithEmployees()).filter(
+    (row) => row.workDate >= startDate && row.workDate <= endDate && (userId === void 0 || row.employee.userId === userId)
+  ).sort(
+    (a, b) => a.workDate.localeCompare(b.workDate) || a.fullName.localeCompare(b.fullName)
+  ).map((row) => ({
+    employeeCode: row.employeeCode,
+    fullName: row.fullName,
+    department: row.department,
+    workDate: row.workDate,
+    checkInAt: row.checkInAt,
+    checkOutAt: row.checkOutAt,
+    lateMinutes: row.lateMinutes,
+    checkInMode: row.checkInMode,
+    note: row.note
+  }));
 }
 async function leaveWithEmployees() {
-  const [leaveRows, employeeRows] = await Promise.all([records("leaveRequests"), records("employees")]);
-  const employeeMap = new Map(employeeRows.map((row) => [asNumber(row.id), mapEmployee(row)]));
-  return leaveRows.map(mapLeave).map((row) => ({ row, employee: employeeMap.get(row.employeeId) })).filter((item) => item.employee).map((item) => ({ ...item.row, employee: item.employee, employeeCode: item.employee.employeeCode, fullName: item.employee.fullName, department: item.employee.department }));
+  const [leaveRows, employeeRows] = await Promise.all([
+    records("leaveRequests"),
+    records("employees")
+  ]);
+  const employeeMap = new Map(
+    employeeRows.map((row) => [asNumber(row.id), mapEmployee(row)])
+  );
+  return leaveRows.map(mapLeave).map((row) => ({ row, employee: employeeMap.get(row.employeeId) })).filter((item) => item.employee).map((item) => ({
+    ...item.row,
+    employee: item.employee,
+    employeeCode: item.employee.employeeCode,
+    fullName: item.employee.fullName,
+    department: item.employee.department
+  }));
 }
 async function getLeaveRequests(limit = 8, userId) {
   return (await leaveWithEmployees()).filter((row) => userId === void 0 || row.employee.userId === userId).sort((a, b) => b.createdAt - a.createdAt).slice(0, limit).map(({ employee, ...row }) => row);
 }
 async function getLeaveRequestsByMonth(monthPrefix, userId) {
-  return (await leaveWithEmployees()).filter((row) => row.startDate.startsWith(monthPrefix) && (userId === void 0 || row.employee.userId === userId)).sort((a, b) => a.startDate.localeCompare(b.startDate) || a.fullName.localeCompare(b.fullName)).map((row) => ({ employeeCode: row.employeeCode, fullName: row.fullName, department: row.department, leaveType: row.leaveType, startDate: row.startDate, endDate: row.endDate, totalDays: row.totalDays, reason: row.reason, status: row.status }));
+  return (await leaveWithEmployees()).filter(
+    (row) => row.startDate.startsWith(monthPrefix) && (userId === void 0 || row.employee.userId === userId)
+  ).sort(
+    (a, b) => a.startDate.localeCompare(b.startDate) || a.fullName.localeCompare(b.fullName)
+  ).map((row) => ({
+    employeeCode: row.employeeCode,
+    fullName: row.fullName,
+    department: row.department,
+    leaveType: row.leaveType,
+    startDate: row.startDate,
+    endDate: row.endDate,
+    totalDays: row.totalDays,
+    reason: row.reason,
+    status: row.status
+  }));
+}
+async function getLeaveRequestsByRange(startDate, endDate, userId) {
+  return (await leaveWithEmployees()).filter(
+    (row) => row.startDate <= endDate && row.endDate >= startDate && (userId === void 0 || row.employee.userId === userId)
+  ).sort(
+    (a, b) => a.startDate.localeCompare(b.startDate) || a.fullName.localeCompare(b.fullName)
+  ).map((row) => ({
+    id: row.id,
+    employeeCode: row.employeeCode,
+    fullName: row.fullName,
+    department: row.department,
+    leaveType: row.leaveType,
+    startDate: row.startDate,
+    endDate: row.endDate,
+    totalDays: row.totalDays,
+    reason: row.reason,
+    status: row.status
+  }));
 }
 async function getDashboardSummary(monthPrefix, userId) {
-  const [employees, attendanceRows, leaveRows] = await Promise.all([getEmployees(userId), attendanceWithEmployees(), leaveWithEmployees()]);
-  const scopedAttendance = attendanceRows.filter((row) => row.workDate.startsWith(monthPrefix) && (userId === void 0 || row.employee.userId === userId));
-  const scopedLeave = leaveRows.filter((row) => userId === void 0 || row.employee.userId === userId);
+  const [employees, attendanceRows, leaveRows] = await Promise.all([
+    getEmployees(userId),
+    attendanceWithEmployees(),
+    leaveWithEmployees()
+  ]);
+  const scopedAttendance = attendanceRows.filter(
+    (row) => row.workDate.startsWith(monthPrefix) && (userId === void 0 || row.employee.userId === userId)
+  );
+  const scopedLeave = leaveRows.filter(
+    (row) => userId === void 0 || row.employee.userId === userId
+  );
   return {
     totalEmployees: employees.filter((employee) => employee.status === "active").length,
     presentDays: scopedAttendance.length,
     lateDays: scopedAttendance.filter((row) => row.lateMinutes > 0).length,
-    approvedLeaveDays: scopedLeave.filter((row) => row.startDate.startsWith(monthPrefix) && row.status === "approved").reduce((sum, row) => sum + row.totalDays, 0),
+    approvedLeaveDays: scopedLeave.filter(
+      (row) => row.startDate.startsWith(monthPrefix) && row.status === "approved"
+    ).reduce((sum, row) => sum + row.totalDays, 0),
+    pendingLeaves: scopedLeave.filter((row) => row.status === "pending").length
+  };
+}
+async function getDashboardSummaryByRange(startDate, endDate, userId) {
+  const [employees, attendanceRows, leaveRows] = await Promise.all([
+    getEmployees(userId),
+    attendanceWithEmployees(),
+    leaveWithEmployees()
+  ]);
+  const scopedAttendance = attendanceRows.filter(
+    (row) => row.workDate >= startDate && row.workDate <= endDate && (userId === void 0 || row.employee.userId === userId)
+  );
+  const scopedLeave = leaveRows.filter(
+    (row) => row.startDate <= endDate && row.endDate >= startDate && (userId === void 0 || row.employee.userId === userId)
+  );
+  return {
+    totalEmployees: employees.filter((employee) => employee.status === "active").length,
+    presentDays: scopedAttendance.length,
+    lateDays: scopedAttendance.filter((row) => row.lateMinutes > 0).length,
+    approvedLeaveDays: scopedLeave.filter((row) => row.status === "approved").reduce((sum, row) => sum + row.totalDays, 0),
     pendingLeaves: scopedLeave.filter((row) => row.status === "pending").length
   };
 }
@@ -447,7 +597,15 @@ async function checkInEmployee(employeeId, workDate, timestamp, input) {
   const lateMinutes = calculateLateMinutes(timestamp, employee.workStartMin);
   const now = Date.now();
   const existingRef = await attendanceRef(employeeId, workDate);
-  const values = { employeeId, workDate, checkInAt: timestamp, lateMinutes, ...input, note: input.note ?? null, updatedAt: now };
+  const values = {
+    employeeId,
+    workDate,
+    checkInAt: timestamp,
+    lateMinutes,
+    ...input,
+    note: input.note ?? null,
+    updatedAt: now
+  };
   if (existingRef) {
     await existingRef.update(values);
     return { id: employeeId, lateMinutes };
@@ -466,7 +624,14 @@ async function createLeaveRequest(input) {
   const db = await getDb();
   const id = await allocateId("leaveRequests");
   const now = Date.now();
-  const values = { id, ...input, reason: input.reason ?? null, status: "pending", createdAt: now, updatedAt: now };
+  const values = {
+    id,
+    ...input,
+    reason: input.reason ?? null,
+    status: "pending",
+    createdAt: now,
+    updatedAt: now
+  };
   await db.collection("leaveRequests").doc(String(id)).set(values);
   return values;
 }
@@ -543,6 +708,18 @@ var appRouter = router({
         userId: z2.number().int().positive().optional()
       })
     ).mutation(({ input }) => createEmployee(input)),
+    update: peopleOpsProcedure.input(
+      z2.object({
+        id: z2.number().int().positive(),
+        employeeCode: z2.string().min(1).max(32),
+        fullName: z2.string().min(1).max(160),
+        department: z2.string().min(1).max(120),
+        position: z2.string().min(1).max(120),
+        workStartMin: z2.number().int().min(0).max(1439).optional(),
+        workEndMin: z2.number().int().min(0).max(1439).optional()
+      })
+    ).mutation(({ input }) => updateEmployee(input)),
+    delete: peopleOpsProcedure.input(z2.object({ id: z2.number().int().positive() })).mutation(({ input }) => deleteEmployee(input.id)),
     linkUser: peopleOpsProcedure.input(
       z2.object({
         employeeId: z2.number().int().positive(),
@@ -602,6 +779,23 @@ var appRouter = router({
         summary
       }))
     ),
+    reportRange: staffProcedure.input(z2.object({ startDate: dateString, endDate: dateString })).query(({ input, ctx }) => {
+      if (input.startDate > input.endDate)
+        throw new TRPCError2({
+          code: "BAD_REQUEST",
+          message: "\u0E0A\u0E48\u0E27\u0E07\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07"
+        });
+      const userId = ctx.user.role === "employee" ? ctx.user.id : void 0;
+      return Promise.all([
+        getAttendanceByRange(input.startDate, input.endDate, userId),
+        getLeaveRequestsByRange(input.startDate, input.endDate, userId),
+        getDashboardSummaryByRange(input.startDate, input.endDate, userId)
+      ]).then(([attendance, leave, summary]) => ({
+        attendance,
+        leave,
+        summary
+      }));
+    }),
     checkIn: staffProcedure.input(
       z2.object({
         employeeId: z2.number().int().positive(),
