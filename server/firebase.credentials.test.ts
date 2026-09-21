@@ -3,8 +3,13 @@ import { importPKCS8, SignJWT } from "jose";
 
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const GOOGLE_SCOPE = "https://www.googleapis.com/auth/datastore";
+const hasFirebaseEnv = Boolean(
+  process.env.FIREBASE_PROJECT_ID &&
+    process.env.FIREBASE_CLIENT_EMAIL &&
+    process.env.FIREBASE_PRIVATE_KEY
+);
 
-describe("Firebase Admin credentials", () => {
+describe.skipIf(!hasFirebaseEnv)("Firebase Admin credentials", () => {
   it("can exchange the configured service account for a Google access token", async () => {
     const projectId = process.env.FIREBASE_PROJECT_ID;
     const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
