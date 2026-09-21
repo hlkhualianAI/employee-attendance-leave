@@ -16,40 +16,39 @@ __export(firebase_exports, {
   getFirestoreDb: () => getFirestoreDb,
   verifyFirebaseIdToken: () => verifyFirebaseIdToken
 });
-import { cert, getApps, initializeApp } from "firebase-admin/app";
-import { getAuth } from "firebase-admin/auth";
-import { getFirestore } from "firebase-admin/firestore";
 function requiredEnv(name) {
   const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required Firebase environment variable: ${name}`);
-  }
+  if (!value) throw new Error(`Missing required Firebase environment variable: ${name}`);
   return value;
 }
-function getFirebaseApp() {
+async function getFirebaseApp() {
+  const { cert, getApps, initializeApp } = await import("firebase-admin/app");
   const existingApp = getApps()[0];
   if (existingApp) return existingApp;
-  const projectId = requiredEnv("FIREBASE_PROJECT_ID");
-  const clientEmail = requiredEnv("FIREBASE_CLIENT_EMAIL");
-  const privateKey = requiredEnv("FIREBASE_PRIVATE_KEY").replace(/\\n/g, "\n");
   return initializeApp({
     credential: cert({
-      projectId,
-      clientEmail,
-      privateKey
+      projectId: requiredEnv("FIREBASE_PROJECT_ID"),
+      clientEmail: requiredEnv("FIREBASE_CLIENT_EMAIL"),
+      privateKey: requiredEnv("FIREBASE_PRIVATE_KEY").replace(/\\n/g, "\n")
     })
   });
 }
-function getFirestoreDb() {
-  firestore ??= getFirestore(getFirebaseApp());
+async function getFirestoreDb() {
+  if (!firestore) {
+    const { getFirestore } = await import("firebase-admin/firestore");
+    firestore = getFirestore(await getFirebaseApp());
+  }
   return firestore;
 }
-function getFirebaseAuth() {
-  firebaseAuth ??= getAuth(getFirebaseApp());
+async function getFirebaseAuth() {
+  if (!firebaseAuth) {
+    const { getAuth } = await import("firebase-admin/auth");
+    firebaseAuth = getAuth(await getFirebaseApp());
+  }
   return firebaseAuth;
 }
-function verifyFirebaseIdToken(token) {
-  return getFirebaseAuth().verifyIdToken(token);
+async function verifyFirebaseIdToken(token) {
+  return (await getFirebaseAuth()).verifyIdToken(token);
 }
 function getFirebaseProjectId() {
   return requiredEnv("FIREBASE_PROJECT_ID");

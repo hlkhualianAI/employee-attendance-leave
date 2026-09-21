@@ -10,8 +10,8 @@ const hasFirebaseEnv = Boolean(
 describe.skipIf(!hasFirebaseEnv)("Firebase Firestore connector", () => {
   it("initializes the Admin SDK and can reach the configured Firestore database", async () => {
     expect(getFirebaseProjectId()).toBeTruthy();
-    const db = getFirestoreDb();
-    expect(getFirestoreDb()).toBe(db);
+    const db = await getFirestoreDb();
+    expect(await getFirestoreDb()).toBe(db);
 
     const collections = await db.listCollections();
     expect(Array.isArray(collections)).toBe(true);
