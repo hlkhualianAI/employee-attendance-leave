@@ -161,107 +161,23 @@ function isValidCoordinate(latitude, longitude) {
   return Number.isFinite(latitude) && Number.isFinite(longitude) && latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180;
 }
 
-// server/db.ts
-import { and, desc, eq, like, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
-
-// drizzle/schema.ts
-import { bigint, double, index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
-var users = mysqlTable("users", {
-  id: int("id").autoincrement().primaryKey(),
-  openId: varchar("openId", { length: 64 }).notNull().unique(),
-  name: text("name"),
-  email: varchar("email", { length: 320 }),
-  loginMethod: varchar("loginMethod", { length: 64 }),
-  role: mysqlEnum("role", ["user", "admin", "hr", "employee"]).default("employee").notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull()
-});
-var employees = mysqlTable(
-  "employees",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    userId: int("userId"),
-    /** Browser device token bound on the first employee self-check-in. */
-    deviceId: varchar("deviceId", { length: 128 }),
-    employeeCode: varchar("employeeCode", { length: 32 }).notNull().unique(),
-    fullName: varchar("fullName", { length: 160 }).notNull(),
-    department: varchar("department", { length: 120 }).notNull(),
-    position: varchar("position", { length: 120 }).notNull(),
-    workStartMin: int("workStartMin").default(510).notNull(),
-    workEndMin: int("workEndMin").default(1050).notNull(),
-    status: mysqlEnum("status", ["active", "inactive"]).default("active").notNull(),
-    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
-    updatedAt: bigint("updatedAt", { mode: "number" }).notNull()
-  },
-  (table) => ({
-    userIdx: index("employees_user_idx").on(table.userId),
-    departmentIdx: index("employees_department_idx").on(table.department),
-    statusIdx: index("employees_status_idx").on(table.status)
-  })
-);
-var attendance = mysqlTable(
-  "attendance",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    employeeId: int("employeeId").notNull(),
-    recordedByUserId: int("recordedByUserId"),
-    workDate: varchar("workDate", { length: 10 }).notNull(),
-    checkInAt: bigint("checkInAt", { mode: "number" }),
-    checkOutAt: bigint("checkOutAt", { mode: "number" }),
-    lateMinutes: int("lateMinutes").default(0).notNull(),
-    checkInMode: mysqlEnum("checkInMode", ["office", "offsite"]).default("office").notNull(),
-    latitude: double("latitude"),
-    longitude: double("longitude"),
-    deviceId: varchar("deviceId", { length: 128 }),
-    note: text("note"),
-    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
-    updatedAt: bigint("updatedAt", { mode: "number" }).notNull()
-  },
-  (table) => ({
-    employeeDateIdx: index("attendance_employee_date_idx").on(table.employeeId, table.workDate),
-    dateIdx: index("attendance_date_idx").on(table.workDate)
-  })
-);
-var leaveRequests = mysqlTable(
-  "leaveRequests",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    employeeId: int("employeeId").notNull(),
-    leaveType: mysqlEnum("leaveType", ["annual", "sick", "personal", "other"]).notNull(),
-    startDate: varchar("startDate", { length: 10 }).notNull(),
-    endDate: varchar("endDate", { length: 10 }).notNull(),
-    totalDays: int("totalDays").notNull(),
-    reason: text("reason"),
-    status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
-    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
-    updatedAt: bigint("updatedAt", { mode: "number" }).notNull()
-  },
-  (table) => ({
-    employeeIdx: index("leave_employee_idx").on(table.employeeId),
-    statusIdx: index("leave_status_idx").on(table.status),
-    dateIdx: index("leave_date_idx").on(table.startDate, table.endDate)
-  })
-);
-
 // server/attendance.logic.ts
-function getBangkokMinutes(timestamp2) {
+function getBangkokMinutes(timestamp) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Bangkok",
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23"
-  }).formatToParts(new Date(timestamp2));
+  }).formatToParts(new Date(timestamp));
   const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
   const minute = Number(parts.find((part) => part.type === "minute")?.value ?? 0);
   return hour * 60 + minute;
 }
-function getBangkokDate(timestamp2 = Date.now()) {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date(timestamp2));
+function getBangkokDate(timestamp = Date.now()) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date(timestamp));
 }
-function calculateLateMinutes(timestamp2, workStartMin) {
-  return Math.max(0, getBangkokMinutes(timestamp2) - workStartMin);
+function calculateLateMinutes(timestamp, workStartMin) {
+  return Math.max(0, getBangkokMinutes(timestamp) - workStartMin);
 }
 function countWeekdays(startDate, endDate) {
   const parseDate = (value) => {
@@ -280,228 +196,260 @@ function countWeekdays(startDate, endDate) {
 }
 
 // server/db.ts
-var _db = null;
+init_firebase();
+var firestore2 = null;
 async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
-    try {
-      _db = drizzle(process.env.DATABASE_URL);
-    } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
-      _db = null;
-    }
+  if (!firestore2) firestore2 = await getFirestoreDb();
+  return firestore2;
+}
+function asDate(value) {
+  if (value instanceof Date) return value;
+  if (typeof value === "number" || typeof value === "string") return new Date(value);
+  if (value && typeof value === "object" && "toDate" in value && typeof value.toDate === "function") {
+    return value.toDate();
   }
-  return _db;
+  return /* @__PURE__ */ new Date();
+}
+function asNumber(value, fallback = 0) {
+  return typeof value === "number" ? value : Number(value ?? fallback);
+}
+function mapUser(data) {
+  return {
+    id: asNumber(data.id),
+    openId: String(data.openId ?? ""),
+    name: data.name ?? null,
+    email: data.email ?? null,
+    loginMethod: data.loginMethod ?? null,
+    role: data.role ?? "employee",
+    createdAt: asDate(data.createdAt),
+    updatedAt: asDate(data.updatedAt),
+    lastSignedIn: asDate(data.lastSignedIn)
+  };
+}
+function mapEmployee(data) {
+  return {
+    id: asNumber(data.id),
+    userId: data.userId == null ? null : asNumber(data.userId),
+    deviceId: data.deviceId ?? null,
+    employeeCode: String(data.employeeCode ?? ""),
+    fullName: String(data.fullName ?? ""),
+    department: String(data.department ?? ""),
+    position: String(data.position ?? ""),
+    workStartMin: asNumber(data.workStartMin, 510),
+    workEndMin: asNumber(data.workEndMin, 1050),
+    status: data.status ?? "active",
+    createdAt: asNumber(data.createdAt),
+    updatedAt: asNumber(data.updatedAt)
+  };
+}
+function mapAttendance(data) {
+  return {
+    id: asNumber(data.id),
+    employeeId: asNumber(data.employeeId),
+    recordedByUserId: data.recordedByUserId == null ? null : asNumber(data.recordedByUserId),
+    workDate: String(data.workDate ?? ""),
+    checkInAt: data.checkInAt == null ? null : asNumber(data.checkInAt),
+    checkOutAt: data.checkOutAt == null ? null : asNumber(data.checkOutAt),
+    lateMinutes: asNumber(data.lateMinutes),
+    checkInMode: data.checkInMode ?? "office",
+    latitude: data.latitude == null ? null : asNumber(data.latitude),
+    longitude: data.longitude == null ? null : asNumber(data.longitude),
+    deviceId: data.deviceId ?? null,
+    note: data.note ?? null,
+    createdAt: asNumber(data.createdAt),
+    updatedAt: asNumber(data.updatedAt)
+  };
+}
+function mapLeave(data) {
+  return {
+    id: asNumber(data.id),
+    employeeId: asNumber(data.employeeId),
+    leaveType: data.leaveType,
+    startDate: String(data.startDate ?? ""),
+    endDate: String(data.endDate ?? ""),
+    totalDays: asNumber(data.totalDays),
+    reason: data.reason ?? null,
+    status: data.status ?? "pending",
+    createdAt: asNumber(data.createdAt),
+    updatedAt: asNumber(data.updatedAt)
+  };
+}
+async function records(collection) {
+  const snapshot = await (await getDb()).collection(collection).get();
+  return snapshot.docs.map((doc) => doc.data());
+}
+async function allocateId(collection) {
+  const db = await getDb();
+  const counterRef = db.collection("meta").doc("counters");
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(counterRef);
+    const current = snapshot.exists ? asNumber(snapshot.data()?.[collection]) : 0;
+    const next = current + 1;
+    transaction.set(counterRef, { [collection]: next }, { merge: true });
+    return next;
+  });
 }
 async function upsertUser(user) {
   if (!user.openId) throw new Error("User openId is required for upsert");
   const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot upsert user: database not available");
-    return;
-  }
-  const values = { openId: user.openId };
-  const updateSet = {};
-  const textFields = ["name", "email", "loginMethod"];
-  const assignNullable = (field) => {
-    const value = user[field];
-    if (value === void 0) return;
-    const normalized = value ?? null;
-    values[field] = normalized;
-    updateSet[field] = normalized;
+  const snapshot = await db.collection("users").where("openId", "==", user.openId).limit(1).get();
+  const now = /* @__PURE__ */ new Date();
+  const existing = snapshot.docs[0];
+  const id = existing ? asNumber(existing.data().id) : await allocateId("users");
+  const values = {
+    id,
+    openId: user.openId,
+    name: user.name ?? null,
+    email: user.email ?? null,
+    loginMethod: user.loginMethod ?? "firebase",
+    role: user.role ?? "employee",
+    createdAt: existing ? existing.data().createdAt : now,
+    updatedAt: now,
+    lastSignedIn: user.lastSignedIn ?? now
   };
-  textFields.forEach(assignNullable);
-  if (user.lastSignedIn !== void 0) {
-    values.lastSignedIn = user.lastSignedIn;
-    updateSet.lastSignedIn = user.lastSignedIn;
-  }
-  if (user.role !== void 0) {
-    values.role = user.role;
-    updateSet.role = user.role;
-  }
-  if (!values.lastSignedIn) values.lastSignedIn = /* @__PURE__ */ new Date();
-  if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = /* @__PURE__ */ new Date();
-  await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
+  await db.collection("users").doc(existing?.id ?? String(id)).set(values, { merge: true });
 }
 async function getUserByOpenId(openId) {
-  const db = await getDb();
-  if (!db) return void 0;
-  const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
-  return result.length > 0 ? result[0] : void 0;
+  const snapshot = await (await getDb()).collection("users").where("openId", "==", openId).limit(1).get();
+  return snapshot.docs[0] ? mapUser(snapshot.docs[0].data()) : void 0;
 }
 async function getUsers() {
-  const db = await getDb();
-  if (!db) return [];
-  return db.select({ id: users.id, name: users.name, email: users.email, role: users.role, lastSignedIn: users.lastSignedIn }).from(users).orderBy(users.name);
+  return (await records("users")).map(mapUser).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")).map((user) => ({ id: user.id, name: user.name, email: user.email, role: user.role, lastSignedIn: user.lastSignedIn }));
 }
 async function getUserById(id) {
-  const db = await getDb();
-  if (!db) return void 0;
-  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
-  return result[0];
+  const snapshot = await (await getDb()).collection("users").where("id", "==", id).limit(1).get();
+  return snapshot.docs[0] ? mapUser(snapshot.docs[0].data()) : void 0;
 }
 async function updateUserRole(id, role) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  await db.update(users).set({ role, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, id));
+  const snapshot = await (await getDb()).collection("users").where("id", "==", id).limit(1).get();
+  if (!snapshot.docs[0]) throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49");
+  await snapshot.docs[0].ref.update({ role, updatedAt: /* @__PURE__ */ new Date() });
   return { id, role };
 }
 async function getEmployees(userId) {
-  const db = await getDb();
-  if (!db) return [];
-  return db.select().from(employees).where(userId === void 0 ? void 0 : eq(employees.userId, userId)).orderBy(employees.status, employees.fullName);
+  return (await records("employees")).map(mapEmployee).filter((employee) => userId === void 0 || employee.userId === userId).sort((a, b) => a.status.localeCompare(b.status) || a.fullName.localeCompare(b.fullName));
 }
 async function getEmployeeByUserId(userId) {
-  const db = await getDb();
-  if (!db) return void 0;
-  const result = await db.select().from(employees).where(eq(employees.userId, userId)).limit(1);
-  return result[0];
+  const employee = (await getEmployees(userId))[0];
+  return employee;
 }
 async function createEmployee(input) {
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
+  const duplicate = await db.collection("employees").where("employeeCode", "==", input.employeeCode).limit(1).get();
+  if (!duplicate.empty) throw new Error("\u0E23\u0E2B\u0E31\u0E2A\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19\u0E19\u0E35\u0E49\u0E16\u0E39\u0E01\u0E43\u0E0A\u0E49\u0E07\u0E32\u0E19\u0E41\u0E25\u0E49\u0E27");
+  const id = await allocateId("employees");
   const now = Date.now();
-  const result = await db.insert(employees).values({ ...input, workStartMin: input.workStartMin ?? 510, workEndMin: input.workEndMin ?? 1050, createdAt: now, updatedAt: now }).$returningId();
-  return result[0];
+  const employee = {
+    id,
+    userId: input.userId ?? null,
+    deviceId: null,
+    employeeCode: input.employeeCode,
+    fullName: input.fullName,
+    department: input.department,
+    position: input.position,
+    workStartMin: input.workStartMin ?? 510,
+    workEndMin: input.workEndMin ?? 1050,
+    status: "active",
+    createdAt: now,
+    updatedAt: now
+  };
+  await db.collection("employees").doc(String(id)).set(employee);
+  return mapEmployee(employee);
+}
+async function employeeRef(employeeId) {
+  const snapshot = await (await getDb()).collection("employees").where("id", "==", employeeId).limit(1).get();
+  return snapshot.docs[0]?.ref;
 }
 async function linkEmployeeUser(employeeId, userId) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  await db.update(employees).set({ userId, updatedAt: Date.now() }).where(eq(employees.id, employeeId));
+  const ref = await employeeRef(employeeId);
+  if (!ref) throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19");
+  await ref.update({ userId, updatedAt: Date.now() });
   return { employeeId, userId };
 }
 async function bindEmployeeDevice(employeeId, deviceId) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  await db.update(employees).set({ deviceId, updatedAt: Date.now() }).where(eq(employees.id, employeeId));
+  const ref = await employeeRef(employeeId);
+  if (!ref) throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19");
+  await ref.update({ deviceId, updatedAt: Date.now() });
   return { employeeId, deviceId };
 }
-function scopedCondition(condition, userId) {
-  return userId === void 0 ? condition : and(condition, eq(employees.userId, userId));
+function joinAttendance(row, employee) {
+  return { ...row, employee, employeeCode: employee.employeeCode, fullName: employee.fullName, department: employee.department };
+}
+async function attendanceWithEmployees() {
+  const [attendanceRows, employeeRows] = await Promise.all([records("attendance"), records("employees")]);
+  const employeeMap = new Map(employeeRows.map((row) => [asNumber(row.id), mapEmployee(row)]));
+  return attendanceRows.map(mapAttendance).map((row) => ({ row, employee: employeeMap.get(row.employeeId) })).filter((item) => item.employee).map((item) => joinAttendance(item.row, item.employee));
 }
 async function getAttendanceByDate(workDate, userId) {
-  const db = await getDb();
-  if (!db) return [];
-  return db.select({
-    id: attendance.id,
-    employeeId: attendance.employeeId,
-    recordedByUserId: attendance.recordedByUserId,
-    employeeCode: employees.employeeCode,
-    fullName: employees.fullName,
-    department: employees.department,
-    workDate: attendance.workDate,
-    checkInAt: attendance.checkInAt,
-    checkOutAt: attendance.checkOutAt,
-    lateMinutes: attendance.lateMinutes,
-    checkInMode: attendance.checkInMode,
-    latitude: attendance.latitude,
-    longitude: attendance.longitude,
-    deviceId: attendance.deviceId,
-    note: attendance.note
-  }).from(attendance).innerJoin(employees, eq(attendance.employeeId, employees.id)).where(scopedCondition(eq(attendance.workDate, workDate), userId)).orderBy(desc(attendance.checkInAt));
+  return (await attendanceWithEmployees()).filter((row) => row.workDate === workDate && (userId === void 0 || row.employee.userId === userId)).sort((a, b) => (b.checkInAt ?? 0) - (a.checkInAt ?? 0)).map(({ employee, ...row }) => row);
 }
 async function getRecentAttendance(limit = 8, userId) {
-  const db = await getDb();
-  if (!db) return [];
-  return db.select({
-    id: attendance.id,
-    recordedByUserId: attendance.recordedByUserId,
-    fullName: employees.fullName,
-    employeeCode: employees.employeeCode,
-    department: employees.department,
-    workDate: attendance.workDate,
-    checkInAt: attendance.checkInAt,
-    checkOutAt: attendance.checkOutAt,
-    lateMinutes: attendance.lateMinutes,
-    checkInMode: attendance.checkInMode,
-    latitude: attendance.latitude,
-    longitude: attendance.longitude,
-    deviceId: attendance.deviceId
-  }).from(attendance).innerJoin(employees, eq(attendance.employeeId, employees.id)).where(userId === void 0 ? void 0 : eq(employees.userId, userId)).orderBy(desc(attendance.updatedAt)).limit(limit);
+  return (await attendanceWithEmployees()).filter((row) => userId === void 0 || row.employee.userId === userId).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit).map(({ employee, ...row }) => row);
 }
 async function getAttendanceByMonth(monthPrefix, userId) {
-  const db = await getDb();
-  if (!db) return [];
-  return db.select({ employeeCode: employees.employeeCode, fullName: employees.fullName, department: employees.department, workDate: attendance.workDate, checkInAt: attendance.checkInAt, checkOutAt: attendance.checkOutAt, lateMinutes: attendance.lateMinutes, checkInMode: attendance.checkInMode, note: attendance.note }).from(attendance).innerJoin(employees, eq(attendance.employeeId, employees.id)).where(userId === void 0 ? like(attendance.workDate, `${monthPrefix}%`) : and(like(attendance.workDate, `${monthPrefix}%`), eq(employees.userId, userId))).orderBy(attendance.workDate, employees.fullName);
+  return (await attendanceWithEmployees()).filter((row) => row.workDate.startsWith(monthPrefix) && (userId === void 0 || row.employee.userId === userId)).sort((a, b) => a.workDate.localeCompare(b.workDate) || a.fullName.localeCompare(b.fullName)).map((row) => ({ employeeCode: row.employeeCode, fullName: row.fullName, department: row.department, workDate: row.workDate, checkInAt: row.checkInAt, checkOutAt: row.checkOutAt, lateMinutes: row.lateMinutes, checkInMode: row.checkInMode, note: row.note }));
+}
+async function leaveWithEmployees() {
+  const [leaveRows, employeeRows] = await Promise.all([records("leaveRequests"), records("employees")]);
+  const employeeMap = new Map(employeeRows.map((row) => [asNumber(row.id), mapEmployee(row)]));
+  return leaveRows.map(mapLeave).map((row) => ({ row, employee: employeeMap.get(row.employeeId) })).filter((item) => item.employee).map((item) => ({ ...item.row, employee: item.employee, employeeCode: item.employee.employeeCode, fullName: item.employee.fullName, department: item.employee.department }));
 }
 async function getLeaveRequests(limit = 8, userId) {
-  const db = await getDb();
-  if (!db) return [];
-  return db.select({
-    id: leaveRequests.id,
-    employeeId: leaveRequests.employeeId,
-    fullName: employees.fullName,
-    employeeCode: employees.employeeCode,
-    department: employees.department,
-    leaveType: leaveRequests.leaveType,
-    startDate: leaveRequests.startDate,
-    endDate: leaveRequests.endDate,
-    totalDays: leaveRequests.totalDays,
-    reason: leaveRequests.reason,
-    status: leaveRequests.status,
-    createdAt: leaveRequests.createdAt
-  }).from(leaveRequests).innerJoin(employees, eq(leaveRequests.employeeId, employees.id)).where(userId === void 0 ? void 0 : eq(employees.userId, userId)).orderBy(desc(leaveRequests.createdAt)).limit(limit);
+  return (await leaveWithEmployees()).filter((row) => userId === void 0 || row.employee.userId === userId).sort((a, b) => b.createdAt - a.createdAt).slice(0, limit).map(({ employee, ...row }) => row);
 }
 async function getLeaveRequestsByMonth(monthPrefix, userId) {
-  const db = await getDb();
-  if (!db) return [];
-  return db.select({ employeeCode: employees.employeeCode, fullName: employees.fullName, department: employees.department, leaveType: leaveRequests.leaveType, startDate: leaveRequests.startDate, endDate: leaveRequests.endDate, totalDays: leaveRequests.totalDays, reason: leaveRequests.reason, status: leaveRequests.status }).from(leaveRequests).innerJoin(employees, eq(leaveRequests.employeeId, employees.id)).where(userId === void 0 ? like(leaveRequests.startDate, `${monthPrefix}%`) : and(like(leaveRequests.startDate, `${monthPrefix}%`), eq(employees.userId, userId))).orderBy(leaveRequests.startDate, employees.fullName);
+  return (await leaveWithEmployees()).filter((row) => row.startDate.startsWith(monthPrefix) && (userId === void 0 || row.employee.userId === userId)).sort((a, b) => a.startDate.localeCompare(b.startDate) || a.fullName.localeCompare(b.fullName)).map((row) => ({ employeeCode: row.employeeCode, fullName: row.fullName, department: row.department, leaveType: row.leaveType, startDate: row.startDate, endDate: row.endDate, totalDays: row.totalDays, reason: row.reason, status: row.status }));
 }
 async function getDashboardSummary(monthPrefix, userId) {
-  const db = await getDb();
-  if (!db) {
-    return { totalEmployees: 0, presentDays: 0, lateDays: 0, approvedLeaveDays: 0, pendingLeaves: 0 };
-  }
-  const [employeeRows, attendanceRows, leaveRows, pendingRows] = await Promise.all([
-    db.select({ value: sql`count(*)` }).from(employees).where(userId === void 0 ? eq(employees.status, "active") : and(eq(employees.status, "active"), eq(employees.userId, userId))),
-    db.select({
-      present: sql`count(*)`,
-      late: sql`coalesce(sum(case when ${attendance.lateMinutes} > 0 then 1 else 0 end), 0)`
-    }).from(attendance).innerJoin(employees, eq(attendance.employeeId, employees.id)).where(userId === void 0 ? like(attendance.workDate, `${monthPrefix}%`) : and(like(attendance.workDate, `${monthPrefix}%`), eq(employees.userId, userId))),
-    db.select({ value: sql`coalesce(sum(${leaveRequests.totalDays}), 0)` }).from(leaveRequests).innerJoin(employees, eq(leaveRequests.employeeId, employees.id)).where(userId === void 0 ? and(like(leaveRequests.startDate, `${monthPrefix}%`), eq(leaveRequests.status, "approved")) : and(like(leaveRequests.startDate, `${monthPrefix}%`), eq(leaveRequests.status, "approved"), eq(employees.userId, userId))),
-    db.select({ value: sql`count(*)` }).from(leaveRequests).innerJoin(employees, eq(leaveRequests.employeeId, employees.id)).where(userId === void 0 ? eq(leaveRequests.status, "pending") : and(eq(leaveRequests.status, "pending"), eq(employees.userId, userId)))
-  ]);
+  const [employees, attendanceRows, leaveRows] = await Promise.all([getEmployees(userId), attendanceWithEmployees(), leaveWithEmployees()]);
+  const scopedAttendance = attendanceRows.filter((row) => row.workDate.startsWith(monthPrefix) && (userId === void 0 || row.employee.userId === userId));
+  const scopedLeave = leaveRows.filter((row) => userId === void 0 || row.employee.userId === userId);
   return {
-    totalEmployees: Number(employeeRows[0]?.value ?? 0),
-    presentDays: Number(attendanceRows[0]?.present ?? 0),
-    lateDays: Number(attendanceRows[0]?.late ?? 0),
-    approvedLeaveDays: Number(leaveRows[0]?.value ?? 0),
-    pendingLeaves: Number(pendingRows[0]?.value ?? 0)
+    totalEmployees: employees.filter((employee) => employee.status === "active").length,
+    presentDays: scopedAttendance.length,
+    lateDays: scopedAttendance.filter((row) => row.lateMinutes > 0).length,
+    approvedLeaveDays: scopedLeave.filter((row) => row.startDate.startsWith(monthPrefix) && row.status === "approved").reduce((sum, row) => sum + row.totalDays, 0),
+    pendingLeaves: scopedLeave.filter((row) => row.status === "pending").length
   };
 }
-async function checkInEmployee(employeeId, workDate, timestamp2, input) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  const employee = await db.select().from(employees).where(eq(employees.id, employeeId)).limit(1);
-  if (!employee[0]) throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19");
-  const existing = await db.select().from(attendance).where(and(eq(attendance.employeeId, employeeId), eq(attendance.workDate, workDate))).limit(1);
-  const lateMinutes = calculateLateMinutes(timestamp2, employee[0].workStartMin);
-  const now = Date.now();
-  if (existing[0]) {
-    await db.update(attendance).set({ checkInAt: timestamp2, lateMinutes, checkInMode: input.checkInMode, latitude: input.latitude, longitude: input.longitude, deviceId: input.deviceId, recordedByUserId: input.recordedByUserId, note: input.note ?? existing[0].note, updatedAt: now }).where(eq(attendance.id, existing[0].id));
-    return { id: existing[0].id, lateMinutes };
-  }
-  const result = await db.insert(attendance).values({ employeeId, workDate, checkInAt: timestamp2, lateMinutes, ...input, createdAt: now, updatedAt: now }).$returningId();
-  return { id: result[0]?.id, lateMinutes };
+async function attendanceRef(employeeId, workDate) {
+  const snapshot = await (await getDb()).collection("attendance").where("employeeId", "==", employeeId).where("workDate", "==", workDate).limit(1).get();
+  return snapshot.docs[0]?.ref;
 }
-async function checkOutEmployee(employeeId, workDate, timestamp2) {
+async function checkInEmployee(employeeId, workDate, timestamp, input) {
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  const existing = await db.select().from(attendance).where(and(eq(attendance.employeeId, employeeId), eq(attendance.workDate, workDate))).limit(1);
-  if (!existing[0]) throw new Error("\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E40\u0E0A\u0E47\u0E04\u0E2D\u0E34\u0E19\u0E02\u0E2D\u0E07\u0E27\u0E31\u0E19\u0E19\u0E35\u0E49");
-  await db.update(attendance).set({ checkOutAt: timestamp2, updatedAt: Date.now() }).where(eq(attendance.id, existing[0].id));
-  return { id: existing[0].id };
+  const employee = (await getEmployees()).find((item) => item.id === employeeId);
+  if (!employee) throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19");
+  const lateMinutes = calculateLateMinutes(timestamp, employee.workStartMin);
+  const now = Date.now();
+  const existingRef = await attendanceRef(employeeId, workDate);
+  const values = { employeeId, workDate, checkInAt: timestamp, lateMinutes, ...input, note: input.note ?? null, updatedAt: now };
+  if (existingRef) {
+    await existingRef.update(values);
+    return { id: employeeId, lateMinutes };
+  }
+  const id = await allocateId("attendance");
+  await db.collection("attendance").doc(String(id)).set({ id, ...values, checkOutAt: null, createdAt: now });
+  return { id, lateMinutes };
+}
+async function checkOutEmployee(employeeId, workDate, timestamp) {
+  const ref = await attendanceRef(employeeId, workDate);
+  if (!ref) throw new Error("\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E40\u0E0A\u0E47\u0E04\u0E2D\u0E34\u0E19\u0E02\u0E2D\u0E07\u0E27\u0E31\u0E19\u0E19\u0E35\u0E49");
+  await ref.update({ checkOutAt: timestamp, updatedAt: Date.now() });
+  return { id: employeeId };
 }
 async function createLeaveRequest(input) {
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
+  const id = await allocateId("leaveRequests");
   const now = Date.now();
-  const result = await db.insert(leaveRequests).values({ ...input, createdAt: now, updatedAt: now }).$returningId();
-  return result[0];
+  const values = { id, ...input, reason: input.reason ?? null, status: "pending", createdAt: now, updatedAt: now };
+  await db.collection("leaveRequests").doc(String(id)).set(values);
+  return values;
 }
 async function updateLeaveStatus(id, status) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  await db.update(leaveRequests).set({ status, updatedAt: Date.now() }).where(eq(leaveRequests.id, id));
+  const snapshot = await (await getDb()).collection("leaveRequests").where("id", "==", id).limit(1).get();
+  if (!snapshot.docs[0]) throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E04\u0E33\u0E02\u0E2D\u0E25\u0E32");
+  await snapshot.docs[0].ref.update({ status, updatedAt: Date.now() });
   return { id, status };
 }
 
