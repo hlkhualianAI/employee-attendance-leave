@@ -16,15 +16,14 @@ __export(firebase_exports, {
   getFirestoreDb: () => getFirestoreDb,
   verifyFirebaseIdToken: () => verifyFirebaseIdToken
 });
-import { cert, getApps, initializeApp } from "firebase-admin/app";
-import { getAuth } from "firebase-admin/auth";
-import { getFirestore } from "firebase-admin/firestore";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 function requiredEnv(name) {
   const value = process.env[name];
   if (!value) throw new Error(`Missing required Firebase environment variable: ${name}`);
   return value;
 }
 async function getFirebaseApp() {
+  const { cert, getApps, initializeApp } = await import("firebase-admin/app");
   const existingApp = getApps()[0];
   if (existingApp) return existingApp;
   return initializeApp({
@@ -37,26 +36,44 @@ async function getFirebaseApp() {
 }
 async function getFirestoreDb() {
   if (!firestore) {
+    const { getFirestore } = await import("firebase-admin/firestore");
     firestore = getFirestore(await getFirebaseApp());
   }
   return firestore;
 }
 async function getFirebaseAuth() {
   if (!firebaseAuth) {
+    const { getAuth } = await import("firebase-admin/auth");
     firebaseAuth = getAuth(await getFirebaseApp());
   }
   return firebaseAuth;
 }
 async function verifyFirebaseIdToken(token) {
-  return (await getFirebaseAuth()).verifyIdToken(token);
+  const projectId = getFirebaseProjectId();
+  const { payload } = await jwtVerify(token, firebaseTokenKeys, {
+    issuer: `https://securetoken.google.com/${projectId}`,
+    audience: projectId
+  });
+  if (typeof payload.sub !== "string" || payload.sub.length === 0) {
+    throw new Error("Firebase ID token has no subject");
+  }
+  const uid = typeof payload.user_id === "string" ? payload.user_id : payload.sub;
+  return {
+    uid,
+    email: typeof payload.email === "string" ? payload.email : void 0,
+    name: typeof payload.name === "string" ? payload.name : void 0
+  };
 }
 function getFirebaseProjectId() {
   return requiredEnv("FIREBASE_PROJECT_ID");
 }
-var firestore, firebaseAuth;
+var firebaseTokenKeys, firestore, firebaseAuth;
 var init_firebase = __esm({
   "server/firebase.ts"() {
     "use strict";
+    firebaseTokenKeys = createRemoteJWKSet(
+      new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com")
+    );
   }
 });
 
