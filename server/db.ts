@@ -742,6 +742,9 @@ export async function checkInEmployee(
   const lateMinutes = calculateLateMinutes(timestamp, employee.workStartMin);
   const now = Date.now();
   const existingRef = await attendanceRef(employeeId, workDate);
+  if (existingRef) {
+    throw new Error("พนักงานเช็คอินแล้ววันนี้ ไม่สามารถเช็คอินซ้ำได้");
+  }
   const values = {
     employeeId,
     workDate,
@@ -751,10 +754,6 @@ export async function checkInEmployee(
     note: input.note ?? null,
     updatedAt: now,
   };
-  if (existingRef) {
-    await existingRef.update(values);
-    return { id: employeeId, lateMinutes };
-  }
   const id = await allocateId("attendance");
   await db
     .collection("attendance")

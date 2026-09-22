@@ -669,6 +669,9 @@ async function checkInEmployee(employeeId, workDate, timestamp, input) {
   const lateMinutes = calculateLateMinutes(timestamp, employee.workStartMin);
   const now = Date.now();
   const existingRef = await attendanceRef(employeeId, workDate);
+  if (existingRef) {
+    throw new Error("\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19\u0E40\u0E0A\u0E47\u0E04\u0E2D\u0E34\u0E19\u0E41\u0E25\u0E49\u0E27\u0E27\u0E31\u0E19\u0E19\u0E35\u0E49 \u0E44\u0E21\u0E48\u0E2A\u0E32\u0E21\u0E32\u0E23\u0E16\u0E40\u0E0A\u0E47\u0E04\u0E2D\u0E34\u0E19\u0E0B\u0E49\u0E33\u0E44\u0E14\u0E49");
+  }
   const values = {
     employeeId,
     workDate,
@@ -678,10 +681,6 @@ async function checkInEmployee(employeeId, workDate, timestamp, input) {
     note: input.note ?? null,
     updatedAt: now
   };
-  if (existingRef) {
-    await existingRef.update(values);
-    return { id: employeeId, lateMinutes };
-  }
   const id = await allocateId("attendance");
   await db.collection("attendance").doc(String(id)).set({ id, ...values, checkOutAt: null, createdAt: now });
   return { id, lateMinutes };
@@ -1076,14 +1075,22 @@ var appRouter = router({
           await bindEmployeeDevice(employee.id, input.deviceId);
       }
       const checkInAt = Date.now();
-      const result = await checkInEmployee(input.employeeId, getBangkokDate(), checkInAt, {
-        checkInMode: input.checkInMode,
-        latitude: input.latitude,
-        longitude: input.longitude,
-        deviceId: input.deviceId,
-        recordedByUserId: ctx.user.id,
-        note: input.note?.trim() || void 0
-      });
+      let result;
+      try {
+        result = await checkInEmployee(input.employeeId, getBangkokDate(), checkInAt, {
+          checkInMode: input.checkInMode,
+          latitude: input.latitude,
+          longitude: input.longitude,
+          deviceId: input.deviceId,
+          recordedByUserId: ctx.user.id,
+          note: input.note?.trim() || void 0
+        });
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("\u0E40\u0E0A\u0E47\u0E04\u0E2D\u0E34\u0E19\u0E41\u0E25\u0E49\u0E27\u0E27\u0E31\u0E19\u0E19\u0E35\u0E49")) {
+          throw new TRPCError2({ code: "CONFLICT", message: error.message });
+        }
+        throw error;
+      }
       if (result.lateMinutes > 0) {
         const employee = (await getEmployees()).find((row) => row.id === input.employeeId);
         if (employee) void notifyLateCheckIn(employee, getBangkokDate(), checkInAt, result.lateMinutes);

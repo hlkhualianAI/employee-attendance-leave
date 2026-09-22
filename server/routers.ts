@@ -327,14 +327,22 @@ export const appRouter = router({
             await bindEmployeeDevice(employee.id, input.deviceId);
         }
         const checkInAt = Date.now();
-        const result = await checkInEmployee(input.employeeId, getBangkokDate(), checkInAt, {
-          checkInMode: input.checkInMode,
-          latitude: input.latitude,
-          longitude: input.longitude,
-          deviceId: input.deviceId,
-          recordedByUserId: ctx.user.id,
-          note: input.note?.trim() || undefined,
-        });
+        let result;
+        try {
+          result = await checkInEmployee(input.employeeId, getBangkokDate(), checkInAt, {
+            checkInMode: input.checkInMode,
+            latitude: input.latitude,
+            longitude: input.longitude,
+            deviceId: input.deviceId,
+            recordedByUserId: ctx.user.id,
+            note: input.note?.trim() || undefined,
+          });
+        } catch (error) {
+          if (error instanceof Error && error.message.includes("เช็คอินแล้ววันนี้")) {
+            throw new TRPCError({ code: "CONFLICT", message: error.message });
+          }
+          throw error;
+        }
         if (result.lateMinutes > 0) {
           const employee = (await getEmployees()).find(row => row.id === input.employeeId);
           if (employee) void notifyLateCheckIn(employee, getBangkokDate(), checkInAt, result.lateMinutes);
