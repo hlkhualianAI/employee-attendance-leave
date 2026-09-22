@@ -1519,6 +1519,7 @@ export default function Home() {
             onFirebaseCheck={() => void firebaseCheckQuery.refetch()}
             firebaseCheck={firebaseCheckQuery.data ?? null}
             firebaseChecking={firebaseCheckQuery.isFetching}
+            firebaseCheckError={firebaseCheckQuery.error?.message ?? null}
             onRoleChange={(id, nextRole) =>
               updateRoleMutation.mutate({ id, role: nextRole })
             }
@@ -1740,6 +1741,7 @@ function RoleManagementCard({
   onFirebaseCheck,
   firebaseCheck,
   firebaseChecking,
+  firebaseCheckError,
   onRoleChange,
   onLinkUser,
   isPending,
@@ -1756,6 +1758,7 @@ function RoleManagementCard({
     firestore: { ok: boolean; sampleCount: number };
   } | null;
   firebaseChecking: boolean;
+  firebaseCheckError: string | null;
   onRoleChange: (id: number, role: RoleSelect) => void;
   onLinkUser: (employeeId: number, userId: number | null) => void;
   isPending: boolean;
@@ -1844,6 +1847,11 @@ function RoleManagementCard({
             {firebaseCheck && (
               <p className="mt-2 text-xs leading-5 text-[#6d8179]">
                 Project: <strong>{firebaseCheck.projectId}</strong> · Auth: {firebaseCheck.auth.sampleCount > 0 ? "เชื่อมต่อแล้ว" : "ไม่พบบัญชี"} · Firestore: {firebaseCheck.firestore.ok ? "เชื่อมต่อแล้ว" : "ผิดพลาด"}
+              </p>
+            )}
+            {firebaseCheckError && (
+              <p className="mt-2 break-words text-xs leading-5 text-rose-700">
+                Firebase check error: {firebaseCheckError}
               </p>
             )}
           </div>
