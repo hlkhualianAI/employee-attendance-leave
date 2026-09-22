@@ -694,7 +694,7 @@ async function checkOutEmployee(employeeId, workDate, timestamp) {
 }
 async function updateAttendanceTime(input) {
   if (input.checkInAt !== null && input.checkOutAt !== null && input.checkOutAt < input.checkInAt) {
-    throw new Error("\u0E40\u0E27\u0E25\u0E32\u0E40\u0E0A\u0E47\u0E04\u0E40\u0E2D\u0E32\u0E15\u0E4C\u0E15\u0E49\u0E2D\u0E07\u0E44\u0E21\u0E48\u0E40\u0E23\u0E47\u0E27\u0E01\u0E01\u0E27\u0E48\u0E32\u0E40\u0E27\u0E25\u0E32\u0E40\u0E0A\u0E47\u0E04\u0E2D\u0E34\u0E19");
+    throw new Error("\u0E40\u0E27\u0E25\u0E32\u0E40\u0E0A\u0E47\u0E04\u0E40\u0E2D\u0E32\u0E15\u0E4C\u0E15\u0E49\u0E2D\u0E07\u0E44\u0E21\u0E48\u0E01\u0E48\u0E2D\u0E19\u0E40\u0E27\u0E25\u0E32\u0E40\u0E0A\u0E47\u0E04\u0E2D\u0E34\u0E19");
   }
   const db = await getDb();
   const snapshot = await db.collection("attendance").where("id", "==", input.id).limit(1).get();
