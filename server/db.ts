@@ -161,7 +161,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     name: user.name ?? null,
     email: user.email ?? null,
     loginMethod: user.loginMethod ?? "firebase",
-    role: user.role ?? "employee",
+    role: user.role ?? (existing?.data().role as User["role"] | undefined) ?? "employee",
     createdAt: existing ? existing.data().createdAt : now,
     updatedAt: now,
     lastSignedIn: user.lastSignedIn ?? now,
@@ -186,21 +186,19 @@ export async function getUsers() {
   let pageToken: string | undefined;
   do {
     const page = await auth.listUsers(1000, pageToken);
-    const knownUsers = await records("users");
-    const knownOpenIds = new Set(knownUsers.map(user => String(user.openId ?? "")));
     for (const authUser of page.users) {
-      if (!knownOpenIds.has(authUser.uid)) {
-        await upsertUser({
-          openId: authUser.uid,
-          name: authUser.displayName ?? authUser.email ?? null,
-          email: authUser.email ?? null,
-          loginMethod: authUser.providerData[0]?.providerId ?? "firebase",
-          role: "employee",
-          lastSignedIn: authUser.metadata.lastSignInTime
-            ? new Date(authUser.metadata.lastSignInTime)
-            : new Date(),
-        });
-      }
+      // Firebase Authentication is authoritative for identity fields. Sync on
+      // every refresh so a newly added or changed email appears immediately.
+      // upsertUser preserves an existing Firestore role when role is omitted.
+      await upsertUser({
+        openId: authUser.uid,
+        name: authUser.displayName ?? authUser.email ?? null,
+        email: authUser.email ?? null,
+        loginMethod: authUser.providerData[0]?.providerId ?? "firebase",
+        lastSignedIn: authUser.metadata.lastSignInTime
+          ? new Date(authUser.metadata.lastSignInTime)
+          : new Date(),
+      });
     }
     pageToken = page.pageToken;
   } while (pageToken);
