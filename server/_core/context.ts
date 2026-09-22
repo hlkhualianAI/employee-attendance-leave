@@ -26,17 +26,18 @@ export async function createContext(opts: CreateExpressContextOptions): Promise<
       // an unauthenticated request.
       try {
         user = await getUserByOpenId(openId) ?? null;
-        if (!user) {
-          await upsertUser({
-            openId,
-            name: decoded.name ?? email ?? openId,
-            email,
-            loginMethod: "firebase",
-            role,
-            lastSignedIn: new Date(),
-          });
-          user = await getUserByOpenId(openId) ?? null;
-        }
+        // Firebase Authentication is authoritative for identity fields. Sync
+        // on every login so an email added or changed in Firebase is reflected
+        // in the current user record immediately.
+        await upsertUser({
+          openId,
+          name: decoded.name ?? email ?? openId,
+          email,
+          loginMethod: "firebase",
+          role: user?.role ?? role,
+          lastSignedIn: new Date(),
+        });
+        user = await getUserByOpenId(openId) ?? null;
         if (user && role === "admin" && user.role !== "admin") {
           await updateUserRole(user.id, "admin");
           user = await getUserByOpenId(openId) ?? user;

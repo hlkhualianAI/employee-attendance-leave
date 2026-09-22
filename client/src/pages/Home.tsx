@@ -1886,10 +1886,11 @@ function RoleManagementCard({
               >
                 <option value="">เลือกบัญชี</option>
                 {users.map(account => (
-                    <option key={account.id} value={account.id}>
-                      {account.name || account.email || `User #${account.id}`}
-                    </option>
-                  ))}
+                  <option key={account.id} value={account.id}>
+                    {account.name || account.email || `User #${account.id}`}
+                    {account.email && account.name ? ` · ${account.email}` : ""}
+                  </option>
+                ))}
               </select>
             </FormField>
             <Button
