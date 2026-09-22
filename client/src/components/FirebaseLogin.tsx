@@ -32,7 +32,7 @@ export default function FirebaseLogin() {
         </div>
         <div className="space-y-2">
           <Label htmlFor="identifier">อีเมล</Label>
-          <Input id="identifier" type="email" autoComplete="email" required value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="เช่น songwit.sont@gmail.com" />
+          <Input id="identifier" type="email" autoComplete="email" required value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="กรอกอีเมล Login ของท่าน" />
         </div>
         <div className="space-y-2">
           <Label htmlFor="pin">PIN</Label>
