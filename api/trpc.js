@@ -8,72 +8,6 @@ import { z as z2 } from "zod";
 // server/_core/systemRouter.ts
 import { z } from "zod";
 
-// server/firebase.ts
-import { createRemoteJWKSet, jwtVerify } from "jose";
-import { gunzipSync } from "node:zlib";
-var firebaseTokenKeys = createRemoteJWKSet(
-  new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com")
-);
-function requiredEnv(name) {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing required Firebase environment variable: ${name}`);
-  return value;
-}
-function getFirebasePrivateKey() {
-  const plain = process.env.FIREBASE_PRIVATE_KEY;
-  if (plain) {
-    const normalized = plain.trim().replace(/^['"]|['"]$/g, "").replace(/\\n/g, "\n");
-    const begin = "-----BEGIN PRIVATE KEY-----";
-    const end = "-----END PRIVATE KEY-----";
-    const beginIndex = normalized.indexOf(begin);
-    const endIndex = normalized.indexOf(end);
-    if (beginIndex >= 0 && endIndex > beginIndex) {
-      const body = normalized.slice(beginIndex + begin.length, endIndex).replace(/\s+/g, "");
-      return `${begin}
-${body.match(/.{1,64}/g)?.join("\n") ?? body}
-${end}
-`;
-    }
-    return normalized;
-  }
-  const compressed = process.env.FIREBASE_PRIVATE_KEY_GZIP_B64;
-  if (compressed) return gunzipSync(Buffer.from(compressed, "base64")).toString("utf8");
-  const encoded = process.env.FIREBASE_PRIVATE_KEY_B64;
-  if (encoded) return Buffer.from(encoded, "base64").toString("utf8");
-  throw new Error("Missing required Firebase private key environment variable");
-}
-async function getFirebaseApp() {
-  const { cert, getApps, initializeApp } = await import("firebase-admin/app");
-  const existingApp = getApps()[0];
-  if (existingApp) return existingApp;
-  return initializeApp({
-    credential: cert({
-      projectId: requiredEnv("FIREBASE_PROJECT_ID"),
-      clientEmail: requiredEnv("FIREBASE_CLIENT_EMAIL"),
-      privateKey: getFirebasePrivateKey()
-    })
-  });
-}
-var firestore;
-var firebaseAuth;
-async function getFirestoreDb() {
-  if (!firestore) {
-    const { getFirestore } = await import("firebase-admin/firestore");
-    firestore = getFirestore(await getFirebaseApp());
-  }
-  return firestore;
-}
-async function getFirebaseAuth() {
-  if (!firebaseAuth) {
-    const { getAuth } = await import("firebase-admin/auth");
-    firebaseAuth = getAuth(await getFirebaseApp());
-  }
-  return firebaseAuth;
-}
-function getFirebaseProjectId() {
-  return requiredEnv("FIREBASE_PROJECT_ID");
-}
-
 // shared/const.ts
 var UNAUTHED_ERR_MSG = "\u0E01\u0E23\u0E38\u0E13\u0E32\u0E40\u0E02\u0E49\u0E32\u0E2A\u0E39\u0E48\u0E23\u0E30\u0E1A\u0E1A (10001)";
 var NOT_ADMIN_ERR_MSG = "\u0E04\u0E38\u0E13\u0E44\u0E21\u0E48\u0E21\u0E35\u0E2A\u0E34\u0E17\u0E18\u0E34\u0E4C\u0E1C\u0E39\u0E49\u0E14\u0E39\u0E41\u0E25\u0E23\u0E30\u0E1A\u0E1A (10002)";
@@ -116,20 +50,7 @@ var adminProcedure = t.procedure.use(
 
 // server/_core/systemRouter.ts
 var systemRouter = router({
-  health: publicProcedure.input(z.object({ timestamp: z.number().min(0, "timestamp cannot be negative") })).query(() => ({ ok: true })),
-  firebaseCheck: adminProcedure.query(async () => {
-    const projectId = getFirebaseProjectId();
-    const auth = await getFirebaseAuth();
-    const authPage = await auth.listUsers(1);
-    const firestore3 = await getFirestoreDb();
-    const firestorePage = await firestore3.collection("users").limit(1).get();
-    return {
-      ok: true,
-      projectId,
-      auth: { ok: true, sampleCount: authPage.users.length },
-      firestore: { ok: true, sampleCount: firestorePage.size }
-    };
-  })
+  health: publicProcedure.input(z.object({ timestamp: z.number().min(0, "timestamp cannot be negative") })).query(() => ({ ok: true }))
 });
 
 // server/location.logic.ts
@@ -193,6 +114,61 @@ function countWeekdays(startDate, endDate) {
     if (day !== 0 && day !== 6) days += 1;
   }
   return days;
+}
+
+// server/firebase.ts
+import { createRemoteJWKSet, jwtVerify } from "jose";
+import { gunzipSync } from "node:zlib";
+var firebaseTokenKeys = createRemoteJWKSet(
+  new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com")
+);
+function requiredEnv(name) {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing required Firebase environment variable: ${name}`);
+  return value;
+}
+function getFirebasePrivateKey() {
+  const plain = process.env.FIREBASE_PRIVATE_KEY;
+  if (plain) {
+    const normalized = plain.trim().replace(/^['"]|['"]$/g, "").replace(/\\n/g, "\n");
+    const begin = "-----BEGIN PRIVATE KEY-----";
+    const end = "-----END PRIVATE KEY-----";
+    const beginIndex = normalized.indexOf(begin);
+    const endIndex = normalized.indexOf(end);
+    if (beginIndex >= 0 && endIndex > beginIndex) {
+      const body = normalized.slice(beginIndex + begin.length, endIndex).replace(/\s+/g, "");
+      return `${begin}
+${body.match(/.{1,64}/g)?.join("\n") ?? body}
+${end}
+`;
+    }
+    return normalized;
+  }
+  const compressed = process.env.FIREBASE_PRIVATE_KEY_GZIP_B64;
+  if (compressed) return gunzipSync(Buffer.from(compressed, "base64")).toString("utf8");
+  const encoded = process.env.FIREBASE_PRIVATE_KEY_B64;
+  if (encoded) return Buffer.from(encoded, "base64").toString("utf8");
+  throw new Error("Missing required Firebase private key environment variable");
+}
+async function getFirebaseApp() {
+  const { cert, getApps, initializeApp } = await import("firebase-admin/app");
+  const existingApp = getApps()[0];
+  if (existingApp) return existingApp;
+  return initializeApp({
+    credential: cert({
+      projectId: requiredEnv("FIREBASE_PROJECT_ID"),
+      clientEmail: requiredEnv("FIREBASE_CLIENT_EMAIL"),
+      privateKey: getFirebasePrivateKey()
+    })
+  });
+}
+var firestore;
+async function getFirestoreDb() {
+  if (!firestore) {
+    const { getFirestore } = await import("firebase-admin/firestore");
+    firestore = getFirestore(await getFirebaseApp());
+  }
+  return firestore;
 }
 
 // server/local-auth.ts
