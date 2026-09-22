@@ -281,6 +281,9 @@ export default function Home() {
   const utils = trpc.useUtils();
   const employeesQuery = trpc.employees.list.useQuery();
   const usersQuery = trpc.users.list.useQuery(undefined, { enabled: isAdmin });
+  const firebaseCheckQuery = trpc.system.firebaseCheck.useQuery(undefined, {
+    enabled: false,
+  });
   const summaryQuery = trpc.attendance.summary.useQuery({
     month: selectedMonth,
   });
@@ -1513,6 +1516,9 @@ export default function Home() {
             employees={employees}
             usersLoading={usersQuery.isLoading}
             usersError={usersQuery.error?.message ?? null}
+            onFirebaseCheck={() => void firebaseCheckQuery.refetch()}
+            firebaseCheck={firebaseCheckQuery.data ?? null}
+            firebaseChecking={firebaseCheckQuery.isFetching}
             onRoleChange={(id, nextRole) =>
               updateRoleMutation.mutate({ id, role: nextRole })
             }
@@ -1731,6 +1737,9 @@ function RoleManagementCard({
   employees,
   usersLoading,
   usersError,
+  onFirebaseCheck,
+  firebaseCheck,
+  firebaseChecking,
   onRoleChange,
   onLinkUser,
   isPending,
@@ -1739,6 +1748,14 @@ function RoleManagementCard({
   employees: EmployeeRow[];
   usersLoading: boolean;
   usersError: string | null;
+  onFirebaseCheck: () => void;
+  firebaseCheck: {
+    ok: boolean;
+    projectId: string;
+    auth: { ok: boolean; sampleCount: number };
+    firestore: { ok: boolean; sampleCount: number };
+  } | null;
+  firebaseChecking: boolean;
   onRoleChange: (id: number, role: RoleSelect) => void;
   onLinkUser: (employeeId: number, userId: number | null) => void;
   isPending: boolean;
@@ -1811,6 +1828,22 @@ function RoleManagementCard({
             ) : (
               <p className="py-6 text-center text-xs text-[#9aa69f]">
                 ยังไม่พบบัญชีผู้ใช้
+              </p>
+            )}
+          </div>
+          <div className="mt-4 border-t border-[#edf1ed] pt-4">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={firebaseChecking}
+              onClick={onFirebaseCheck}
+            >
+              {firebaseChecking ? "กำลังตรวจ Firebase…" : "ตรวจการเชื่อมต่อ Firebase"}
+            </Button>
+            {firebaseCheck && (
+              <p className="mt-2 text-xs leading-5 text-[#6d8179]">
+                Project: <strong>{firebaseCheck.projectId}</strong> · Auth: {firebaseCheck.auth.sampleCount > 0 ? "เชื่อมต่อแล้ว" : "ไม่พบบัญชี"} · Firestore: {firebaseCheck.firestore.ok ? "เชื่อมต่อแล้ว" : "ผิดพลาด"}
               </p>
             )}
           </div>
