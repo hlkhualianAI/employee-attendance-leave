@@ -1,6 +1,6 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
-import { getUserByOpenId, upsertUser } from "../db";
+import { getUserByOpenId, updateUserRole, upsertUser } from "../db";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -36,6 +36,10 @@ export async function createContext(opts: CreateExpressContextOptions): Promise<
             lastSignedIn: new Date(),
           });
           user = await getUserByOpenId(openId) ?? null;
+        }
+        if (user && role === "admin" && user.role !== "admin") {
+          await updateUserRole(user.id, "admin");
+          user = await getUserByOpenId(openId) ?? user;
         }
       } catch (error) {
         console.warn("[Database] Failed to synchronize Firebase user:", error);
