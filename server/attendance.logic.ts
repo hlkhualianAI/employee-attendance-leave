@@ -30,7 +30,7 @@ export function countWeekdays(startDate: string, endDate: string) {
   let days = 0;
   for (let cursor = start.getTime(); cursor <= end.getTime(); cursor += 86400000) {
     const day = new Date(cursor).getUTCDay();
-    if (day !== 0) days += 1;
+    if (day !== 0 && day !== 6) days += 1;
   }
   return days;
 }

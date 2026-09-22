@@ -211,7 +211,7 @@ function countWeekdays(startDate: string, endDate: string) {
     cursor += 86400000
   ) {
     const day = new Date(cursor).getUTCDay();
-    if (day !== 0) days += 1;
+    if (day !== 0 && day !== 6) days += 1;
   }
   return days;
 }
@@ -260,6 +260,7 @@ export default function Home() {
   const [employeeForm, setEmployeeForm] = useState({
     employeeCode: "",
     fullName: "",
+    pin: "",
     department: "",
     position: "",
     startDate: today,
@@ -309,6 +310,7 @@ export default function Home() {
       setEmployeeForm({
         employeeCode: "",
         fullName: "",
+        pin: "",
         department: "",
         position: "",
         startDate: today,
@@ -1239,6 +1241,23 @@ export default function Home() {
                         })
                       }
                       placeholder="ชื่อพนักงาน"
+                    />
+                  </FormField>
+                  <FormField label="PIN สำหรับเข้าสู่ระบบ">
+                    <Input
+                      required
+                      minLength={4}
+                      type="password"
+                      inputMode="numeric"
+                      autoComplete="new-password"
+                      value={employeeForm.pin}
+                      onChange={event =>
+                        setEmployeeForm({
+                          ...employeeForm,
+                          pin: event.target.value,
+                        })
+                      }
+                      placeholder="อย่างน้อย 4 หลัก"
                     />
                   </FormField>
                   <FormField label="วันเริ่มงาน">

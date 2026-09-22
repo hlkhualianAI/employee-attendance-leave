@@ -1,6 +1,7 @@
 import type { Firestore } from "firebase-admin/firestore";
 import { calculateLateMinutes, countWeekdays } from "./attendance.logic";
-import { getFirebaseAuth, getFirestoreDb } from "./firebase";
+import { getFirestoreDb } from "./firebase";
+import { hashPin } from "./local-auth";
 import type {
   Attendance,
   Employee,
@@ -11,6 +12,12 @@ import type {
 
 type AppRole = "admin" | "hr" | "employee";
 type FirestoreRecord = Record<string, unknown>;
+type LocalUserRecord = FirestoreRecord & {
+  id: number;
+  role: User["role"];
+  employeeCode?: string | null;
+  pinHash?: string | null;
+};
 
 let firestore: Firestore | null = null;
 
@@ -181,27 +188,45 @@ export async function getUserByOpenId(openId: string) {
   return snapshot.docs[0] ? mapUser(snapshot.docs[0].data()) : undefined;
 }
 
-export async function getUsers() {
-  const auth = await getFirebaseAuth();
-  let pageToken: string | undefined;
-  do {
-    const page = await auth.listUsers(1000, pageToken);
-    for (const authUser of page.users) {
-      // Firebase Authentication is authoritative for identity fields. Sync on
-      // every refresh so a newly added or changed email appears immediately.
-      // upsertUser preserves an existing Firestore role when role is omitted.
-      await upsertUser({
-        openId: authUser.uid,
-        name: authUser.displayName ?? authUser.email ?? null,
-        email: authUser.email ?? null,
-        loginMethod: authUser.providerData[0]?.providerId ?? "firebase",
-        lastSignedIn: authUser.metadata.lastSignInTime
-          ? new Date(authUser.metadata.lastSignInTime)
-          : new Date(),
+export async function ensurePrimaryAdmin() {
+  const email = (process.env.OWNER_EMAIL ?? "songwit.sont@gmail.com").trim().toLowerCase();
+  const existing = await getLocalUserByIdentifier(email);
+  if (existing) {
+    const snapshot = await (await getDb()).collection("users").where("id", "==", existing.id).limit(1).get();
+    if (snapshot.docs[0] && (!existing.pinHash || existing.role !== "admin" || existing.loginMethod !== "local")) {
+      await snapshot.docs[0].ref.update({
+        pinHash: existing.pinHash ?? hashPin(process.env.OWNER_PIN ?? "123456"),
+        loginMethod: "local",
+        role: "admin",
+        updatedAt: new Date(),
       });
     }
-    pageToken = page.pageToken;
-  } while (pageToken);
+    if (existing.role !== "admin") {
+      if (snapshot.docs[0]) await snapshot.docs[0].ref.update({ role: "admin", updatedAt: new Date() });
+    }
+    return existing;
+  }
+  const db = await getDb();
+  const id = await allocateId("users");
+  const now = new Date();
+  const account = {
+    id,
+    openId: `local:admin:${email}`,
+    name: email,
+    email,
+    pinHash: hashPin(process.env.OWNER_PIN ?? "123456"),
+    loginMethod: "local",
+    role: "admin",
+    createdAt: now,
+    updatedAt: now,
+    lastSignedIn: now,
+  } satisfies LocalUserRecord;
+  await db.collection("users").doc(String(id)).set(account);
+  return account;
+}
+
+export async function getUsers() {
+  await ensurePrimaryAdmin();
   return (await records("users"))
     .map(mapUser)
     .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""))
@@ -221,6 +246,65 @@ export async function getUserById(id: number) {
     .limit(1)
     .get();
   return snapshot.docs[0] ? mapUser(snapshot.docs[0].data()) : undefined;
+}
+
+export async function getLocalUserByIdentifier(identifier: string) {
+  const normalized = identifier.trim().toLowerCase();
+  const snapshot = await (await getDb()).collection("users").get();
+  const record = snapshot.docs
+    .map(doc => doc.data() as LocalUserRecord)
+    .find(user =>
+      String(user.email ?? "").toLowerCase() === normalized ||
+      String(user.employeeCode ?? "").toLowerCase() === normalized
+    );
+  return record;
+}
+
+export async function createLocalEmployeeAccount(input: {
+  employeeCode: string;
+  fullName: string;
+  pin: string;
+  role?: User["role"];
+}) {
+  const db = await getDb();
+  const existing = await getLocalUserByIdentifier(input.employeeCode);
+  if (existing) throw new Error("รหัสพนักงานนี้มีบัญชีผู้ใช้แล้ว");
+  const id = await allocateId("users");
+  const now = new Date();
+  const account = {
+    id,
+    openId: `local:${input.employeeCode}`,
+    name: input.fullName,
+    email: null,
+    employeeCode: input.employeeCode,
+    pinHash: hashPin(input.pin),
+    loginMethod: "local",
+    role: input.role ?? "employee",
+    createdAt: now,
+    updatedAt: now,
+    lastSignedIn: now,
+  } satisfies LocalUserRecord;
+  await db.collection("users").doc(String(id)).set(account);
+  return mapUser(account);
+}
+
+export async function updateLocalUserPin(userId: number, pin: string) {
+  const snapshot = await (await getDb())
+    .collection("users")
+    .where("id", "==", userId)
+    .limit(1)
+    .get();
+  if (!snapshot.docs[0]) throw new Error("ไม่พบบัญชีผู้ใช้");
+  await snapshot.docs[0].ref.update({ pinHash: hashPin(pin), updatedAt: new Date() });
+}
+
+export async function markLocalUserSignedIn(userId: number) {
+  const snapshot = await (await getDb())
+    .collection("users")
+    .where("id", "==", userId)
+    .limit(1)
+    .get();
+  if (snapshot.docs[0]) await snapshot.docs[0].ref.update({ lastSignedIn: new Date() });
 }
 
 export async function updateUserRole(id: number, role: AppRole) {
@@ -258,6 +342,7 @@ export async function createEmployee(input: {
   workStartMin?: number;
   workEndMin?: number;
   userId?: number;
+  pin?: string;
 }) {
   const db = await getDb();
   const duplicate = await db
@@ -283,6 +368,12 @@ export async function createEmployee(input: {
     createdAt: now,
     updatedAt: now,
   } satisfies FirestoreRecord;
+  const account = await createLocalEmployeeAccount({
+    employeeCode: input.employeeCode,
+    fullName: input.fullName,
+    pin: input.pin ?? process.env.DEFAULT_EMPLOYEE_PIN ?? "123456",
+  });
+  employee.userId = account.id;
   await db.collection("employees").doc(String(id)).set(employee);
   return mapEmployee(employee);
 }

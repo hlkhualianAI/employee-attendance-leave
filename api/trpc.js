@@ -1,23 +1,19 @@
-var __defProp = Object.defineProperty;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-};
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
+// serverless/trpc.ts
+import { createExpressMiddleware } from "@trpc/server/adapters/express";
+
+// server/routers.ts
+import { TRPCError as TRPCError2 } from "@trpc/server";
+import { z as z2 } from "zod";
+
+// server/_core/systemRouter.ts
+import { z } from "zod";
 
 // server/firebase.ts
-var firebase_exports = {};
-__export(firebase_exports, {
-  getFirebaseAuth: () => getFirebaseAuth,
-  getFirebaseProjectId: () => getFirebaseProjectId,
-  getFirestoreDb: () => getFirestoreDb,
-  verifyFirebaseIdToken: () => verifyFirebaseIdToken
-});
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { gunzipSync } from "node:zlib";
+var firebaseTokenKeys = createRemoteJWKSet(
+  new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com")
+);
 function requiredEnv(name) {
   const value = process.env[name];
   if (!value) throw new Error(`Missing required Firebase environment variable: ${name}`);
@@ -58,6 +54,8 @@ async function getFirebaseApp() {
     })
   });
 }
+var firestore;
+var firebaseAuth;
 async function getFirestoreDb() {
   if (!firestore) {
     const { getFirestore } = await import("firebase-admin/firestore");
@@ -72,44 +70,9 @@ async function getFirebaseAuth() {
   }
   return firebaseAuth;
 }
-async function verifyFirebaseIdToken(token) {
-  const projectId = getFirebaseProjectId();
-  const { payload } = await jwtVerify(token, firebaseTokenKeys, {
-    issuer: `https://securetoken.google.com/${projectId}`,
-    audience: projectId
-  });
-  if (typeof payload.sub !== "string" || payload.sub.length === 0) {
-    throw new Error("Firebase ID token has no subject");
-  }
-  const uid = typeof payload.user_id === "string" ? payload.user_id : payload.sub;
-  return {
-    uid,
-    email: typeof payload.email === "string" ? payload.email : void 0,
-    name: typeof payload.name === "string" ? payload.name : void 0
-  };
-}
 function getFirebaseProjectId() {
   return requiredEnv("FIREBASE_PROJECT_ID");
 }
-var firebaseTokenKeys, firestore, firebaseAuth;
-var init_firebase = __esm({
-  "server/firebase.ts"() {
-    "use strict";
-    firebaseTokenKeys = createRemoteJWKSet(
-      new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com")
-    );
-  }
-});
-
-// serverless/trpc.ts
-import { createExpressMiddleware } from "@trpc/server/adapters/express";
-
-// server/routers.ts
-import { TRPCError as TRPCError2 } from "@trpc/server";
-import { z as z2 } from "zod";
-
-// server/_core/systemRouter.ts
-import { z } from "zod";
 
 // shared/const.ts
 var UNAUTHED_ERR_MSG = "\u0E01\u0E23\u0E38\u0E13\u0E32\u0E40\u0E02\u0E49\u0E32\u0E2A\u0E39\u0E48\u0E23\u0E30\u0E1A\u0E1A (10001)";
@@ -153,7 +116,20 @@ var adminProcedure = t.procedure.use(
 
 // server/_core/systemRouter.ts
 var systemRouter = router({
-  health: publicProcedure.input(z.object({ timestamp: z.number().min(0, "timestamp cannot be negative") })).query(() => ({ ok: true }))
+  health: publicProcedure.input(z.object({ timestamp: z.number().min(0, "timestamp cannot be negative") })).query(() => ({ ok: true })),
+  firebaseCheck: adminProcedure.query(async () => {
+    const projectId = getFirebaseProjectId();
+    const auth = await getFirebaseAuth();
+    const authPage = await auth.listUsers(1);
+    const firestore3 = await getFirestoreDb();
+    const firestorePage = await firestore3.collection("users").limit(1).get();
+    return {
+      ok: true,
+      projectId,
+      auth: { ok: true, sampleCount: authPage.users.length },
+      firestore: { ok: true, sampleCount: firestorePage.size }
+    };
+  })
 });
 
 // server/location.logic.ts
@@ -219,24 +195,77 @@ function countWeekdays(startDate, endDate) {
   return days;
 }
 
+// server/local-auth.ts
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+var HASH_ALGORITHM = "sha256";
+var SALT_BYTES = 16;
+function hashPin(pin) {
+  const salt = randomBytes(SALT_BYTES);
+  const hash = createHash(HASH_ALGORITHM).update(salt).update(pin).digest("hex");
+  return `${salt.toString("hex")}:${hash}`;
+}
+function verifyPin(pin, encodedHash) {
+  if (!encodedHash) return false;
+  const [saltHex, expectedHex] = encodedHash.split(":");
+  if (!saltHex || !expectedHex || !/^[0-9a-f]+$/i.test(saltHex) || !/^[0-9a-f]+$/i.test(expectedHex)) {
+    return false;
+  }
+  const actual = createHash(HASH_ALGORITHM).update(Buffer.from(saltHex, "hex")).update(pin).digest();
+  const expected = Buffer.from(expectedHex, "hex");
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+function sessionSignature(value, secret) {
+  return createHmac("sha256", secret).update(value).digest("base64url");
+}
+function createSessionToken(userId, secret, ttlSeconds = 60 * 60 * 24 * 7) {
+  const payload = Buffer.from(JSON.stringify({ userId, exp: Math.floor(Date.now() / 1e3) + ttlSeconds })).toString("base64url");
+  return `${payload}.${sessionSignature(payload, secret)}`;
+}
+function readSessionUserId(token, secret) {
+  if (!token) return null;
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature || sessionSignature(payload, secret) !== signature) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return parsed.exp > Math.floor(Date.now() / 1e3) && Number.isInteger(parsed.userId) ? parsed.userId : null;
+  } catch {
+    return null;
+  }
+}
+
 // server/db.ts
-init_firebase();
 var firestore2 = null;
 async function getDb() {
   if (!firestore2) firestore2 = await getFirestoreDb();
   return firestore2;
 }
 function asDate(value) {
-  if (value instanceof Date) return value;
-  if (typeof value === "number" || typeof value === "string")
-    return new Date(value);
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value === "number" || typeof value === "string") {
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
   if (value && typeof value === "object" && "toDate" in value && typeof value.toDate === "function") {
-    return value.toDate();
+    const date = value.toDate();
+    if (date instanceof Date && !Number.isNaN(date.getTime())) return date;
   }
   return /* @__PURE__ */ new Date();
 }
+function asDateString(value, fallbackTimestamp) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+  const date = asDate(value);
+  const timestamp = Number.isNaN(date.getTime()) ? fallbackTimestamp : date.getTime();
+  return bangkokDateFromTimestamp(timestamp);
+}
 function asNumber(value, fallback = 0) {
   return typeof value === "number" ? value : Number(value ?? fallback);
+}
+function bangkokDateFromTimestamp(timestamp) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(
+    new Date(timestamp)
+  );
 }
 function mapUser(data) {
   return {
@@ -260,6 +289,7 @@ function mapEmployee(data) {
     fullName: String(data.fullName ?? ""),
     department: String(data.department ?? ""),
     position: String(data.position ?? ""),
+    startDate: asDateString(data.startDate, asNumber(data.createdAt, Date.now())),
     workStartMin: asNumber(data.workStartMin, 510),
     workEndMin: asNumber(data.workEndMin, 1050),
     status: data.status ?? "active",
@@ -314,31 +344,44 @@ async function allocateId(collection) {
     return next;
   });
 }
-async function upsertUser(user) {
-  if (!user.openId) throw new Error("User openId is required for upsert");
+async function ensurePrimaryAdmin() {
+  const email = (process.env.OWNER_EMAIL ?? "songwit.sont@gmail.com").trim().toLowerCase();
+  const existing = await getLocalUserByIdentifier(email);
+  if (existing) {
+    const snapshot = await (await getDb()).collection("users").where("id", "==", existing.id).limit(1).get();
+    if (snapshot.docs[0] && (!existing.pinHash || existing.role !== "admin" || existing.loginMethod !== "local")) {
+      await snapshot.docs[0].ref.update({
+        pinHash: existing.pinHash ?? hashPin(process.env.OWNER_PIN ?? "123456"),
+        loginMethod: "local",
+        role: "admin",
+        updatedAt: /* @__PURE__ */ new Date()
+      });
+    }
+    if (existing.role !== "admin") {
+      if (snapshot.docs[0]) await snapshot.docs[0].ref.update({ role: "admin", updatedAt: /* @__PURE__ */ new Date() });
+    }
+    return existing;
+  }
   const db = await getDb();
-  const snapshot = await db.collection("users").where("openId", "==", user.openId).limit(1).get();
+  const id = await allocateId("users");
   const now = /* @__PURE__ */ new Date();
-  const existing = snapshot.docs[0];
-  const id = existing ? asNumber(existing.data().id) : await allocateId("users");
-  const values = {
+  const account = {
     id,
-    openId: user.openId,
-    name: user.name ?? null,
-    email: user.email ?? null,
-    loginMethod: user.loginMethod ?? "firebase",
-    role: user.role ?? "employee",
-    createdAt: existing ? existing.data().createdAt : now,
+    openId: `local:admin:${email}`,
+    name: email,
+    email,
+    pinHash: hashPin(process.env.OWNER_PIN ?? "123456"),
+    loginMethod: "local",
+    role: "admin",
+    createdAt: now,
     updatedAt: now,
-    lastSignedIn: user.lastSignedIn ?? now
+    lastSignedIn: now
   };
-  await db.collection("users").doc(existing?.id ?? String(id)).set(values, { merge: true });
-}
-async function getUserByOpenId(openId) {
-  const snapshot = await (await getDb()).collection("users").where("openId", "==", openId).limit(1).get();
-  return snapshot.docs[0] ? mapUser(snapshot.docs[0].data()) : void 0;
+  await db.collection("users").doc(String(id)).set(account);
+  return account;
 }
 async function getUsers() {
+  await ensurePrimaryAdmin();
   return (await records("users")).map(mapUser).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")).map((user) => ({
     id: user.id,
     name: user.name,
@@ -350,6 +393,40 @@ async function getUsers() {
 async function getUserById(id) {
   const snapshot = await (await getDb()).collection("users").where("id", "==", id).limit(1).get();
   return snapshot.docs[0] ? mapUser(snapshot.docs[0].data()) : void 0;
+}
+async function getLocalUserByIdentifier(identifier) {
+  const normalized = identifier.trim().toLowerCase();
+  const snapshot = await (await getDb()).collection("users").get();
+  const record = snapshot.docs.map((doc) => doc.data()).find(
+    (user) => String(user.email ?? "").toLowerCase() === normalized || String(user.employeeCode ?? "").toLowerCase() === normalized
+  );
+  return record;
+}
+async function createLocalEmployeeAccount(input) {
+  const db = await getDb();
+  const existing = await getLocalUserByIdentifier(input.employeeCode);
+  if (existing) throw new Error("\u0E23\u0E2B\u0E31\u0E2A\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19\u0E19\u0E35\u0E49\u0E21\u0E35\u0E1A\u0E31\u0E0D\u0E0A\u0E35\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E41\u0E25\u0E49\u0E27");
+  const id = await allocateId("users");
+  const now = /* @__PURE__ */ new Date();
+  const account = {
+    id,
+    openId: `local:${input.employeeCode}`,
+    name: input.fullName,
+    email: null,
+    employeeCode: input.employeeCode,
+    pinHash: hashPin(input.pin),
+    loginMethod: "local",
+    role: input.role ?? "employee",
+    createdAt: now,
+    updatedAt: now,
+    lastSignedIn: now
+  };
+  await db.collection("users").doc(String(id)).set(account);
+  return mapUser(account);
+}
+async function markLocalUserSignedIn(userId) {
+  const snapshot = await (await getDb()).collection("users").where("id", "==", userId).limit(1).get();
+  if (snapshot.docs[0]) await snapshot.docs[0].ref.update({ lastSignedIn: /* @__PURE__ */ new Date() });
 }
 async function updateUserRole(id, role) {
   const snapshot = await (await getDb()).collection("users").where("id", "==", id).limit(1).get();
@@ -380,12 +457,19 @@ async function createEmployee(input) {
     fullName: input.fullName,
     department: input.department,
     position: input.position,
+    startDate: input.startDate,
     workStartMin: input.workStartMin ?? 510,
     workEndMin: input.workEndMin ?? 1050,
     status: "active",
     createdAt: now,
     updatedAt: now
   };
+  const account = await createLocalEmployeeAccount({
+    employeeCode: input.employeeCode,
+    fullName: input.fullName,
+    pin: input.pin ?? process.env.DEFAULT_EMPLOYEE_PIN ?? "123456"
+  });
+  employee.userId = account.id;
   await db.collection("employees").doc(String(id)).set(employee);
   return mapEmployee(employee);
 }
@@ -582,7 +666,13 @@ async function getDashboardSummaryByRange(startDate, endDate, userId) {
     totalEmployees: employees.filter((employee) => employee.status === "active").length,
     presentDays: scopedAttendance.length,
     lateDays: scopedAttendance.filter((row) => row.lateMinutes > 0).length,
-    approvedLeaveDays: scopedLeave.filter((row) => row.status === "approved").reduce((sum, row) => sum + row.totalDays, 0),
+    approvedLeaveDays: scopedLeave.filter((row) => row.status === "approved").reduce(
+      (sum, row) => sum + countWeekdays(
+        row.startDate < startDate ? startDate : row.startDate,
+        row.endDate > endDate ? endDate : row.endDate
+      ),
+      0
+    ),
     pendingLeaves: scopedLeave.filter((row) => row.status === "pending").length
   };
 }
@@ -642,7 +732,21 @@ async function updateLeaveStatus(id, status) {
   return { id, status };
 }
 
+// server/_core/context.ts
+import { parse } from "cookie";
+var SESSION_COOKIE = "timekeep_session";
+function getLocalAuthSecret() {
+  return process.env.LOCAL_AUTH_SECRET ?? `${process.env.OWNER_EMAIL ?? "songwit.sont@gmail.com"}:timekeep`;
+}
+async function createContext(opts) {
+  const token = parse(opts.req.headers.cookie ?? "")[SESSION_COOKIE];
+  const userId = readSessionUserId(token, getLocalAuthSecret());
+  const user = userId === null ? null : await getUserById(userId) ?? null;
+  return { req: opts.req, res: opts.res, user };
+}
+
 // server/routers.ts
+import { serialize } from "cookie";
 var dateString = z2.string().regex(/^\d{4}-\d{2}-\d{2}$/, "\u0E23\u0E39\u0E1B\u0E41\u0E1A\u0E1A\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07");
 var roleSchema = z2.enum(["admin", "hr", "employee"]);
 function effectiveRole(role) {
@@ -679,7 +783,34 @@ var appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
-    logout: publicProcedure.mutation(() => ({ success: true }))
+    login: publicProcedure.input(z2.object({ identifier: z2.string().min(1).max(160), pin: z2.string().min(4).max(128) })).mutation(async ({ input, ctx }) => {
+      await ensurePrimaryAdmin();
+      const account = await getLocalUserByIdentifier(input.identifier);
+      if (!account || !verifyPin(input.pin, String(account.pinHash ?? ""))) {
+        throw new TRPCError2({ code: "UNAUTHORIZED", message: "\u0E23\u0E2B\u0E31\u0E2A\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19\u0E2B\u0E23\u0E37\u0E2D PIN \u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07" });
+      }
+      await markLocalUserSignedIn(account.id);
+      ctx.res.setHeader("Set-Cookie", serialize(SESSION_COOKIE, createSessionToken(account.id, getLocalAuthSecret()), {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: 60 * 60 * 24 * 7
+      }));
+      return { success: true };
+    }),
+    logout: publicProcedure.mutation(({ ctx }) => {
+      if (typeof ctx.res.setHeader === "function") {
+        ctx.res.setHeader("Set-Cookie", serialize(SESSION_COOKIE, "", {
+          httpOnly: true,
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === "production",
+          path: "/",
+          maxAge: 0
+        }));
+      }
+      return { success: true };
+    })
   }),
   users: router({
     list: adminProcedure2.query(() => getUsers()),
@@ -703,9 +834,11 @@ var appRouter = router({
         fullName: z2.string().min(1).max(160),
         department: z2.string().min(1).max(120),
         position: z2.string().min(1).max(120),
+        startDate: dateString,
         workStartMin: z2.number().int().min(0).max(1439).optional(),
         workEndMin: z2.number().int().min(0).max(1439).optional(),
-        userId: z2.number().int().positive().optional()
+        userId: z2.number().int().positive().optional(),
+        pin: z2.string().min(4).max(128)
       })
     ).mutation(({ input }) => createEmployee(input)),
     update: peopleOpsProcedure.input(
@@ -715,6 +848,7 @@ var appRouter = router({
         fullName: z2.string().min(1).max(160),
         department: z2.string().min(1).max(120),
         position: z2.string().min(1).max(120),
+        startDate: dateString,
         workStartMin: z2.number().int().min(0).max(1439).optional(),
         workEndMin: z2.number().int().min(0).max(1439).optional()
       })
@@ -907,45 +1041,6 @@ var appRouter = router({
     ).mutation(({ input }) => updateLeaveStatus(input.id, input.status))
   })
 });
-
-// server/_core/context.ts
-var primaryAdminEmail = (process.env.OWNER_EMAIL ?? "songwit.sont@gmail.com").toLowerCase();
-async function createContext(opts) {
-  let user = null;
-  const authHeader = opts.req.headers.authorization;
-  if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
-    try {
-      const { verifyFirebaseIdToken: verifyFirebaseIdToken2 } = await Promise.resolve().then(() => (init_firebase(), firebase_exports));
-      const decoded = await verifyFirebaseIdToken2(authHeader.slice(7));
-      const openId = decoded.uid;
-      const email = decoded.email ?? null;
-      const role = email?.toLowerCase() === primaryAdminEmail ? "admin" : "employee";
-      try {
-        user = await getUserByOpenId(openId) ?? null;
-        if (!user) {
-          await upsertUser({
-            openId,
-            name: decoded.name ?? email ?? openId,
-            email,
-            loginMethod: "firebase",
-            role,
-            lastSignedIn: /* @__PURE__ */ new Date()
-          });
-          user = await getUserByOpenId(openId) ?? null;
-        }
-      } catch (error) {
-        console.warn("[Database] Failed to synchronize Firebase user:", error);
-      }
-      if (!user) {
-        const now = /* @__PURE__ */ new Date();
-        user = { id: 0, openId, name: decoded.name ?? email, email, loginMethod: "firebase", role, createdAt: now, updatedAt: now, lastSignedIn: now };
-      }
-    } catch (error) {
-      console.warn("[Firebase Auth] Invalid ID token", error);
-    }
-  }
-  return { req: opts.req, res: opts.res, user };
-}
 
 // serverless/trpc.ts
 var trpc_default = createExpressMiddleware({

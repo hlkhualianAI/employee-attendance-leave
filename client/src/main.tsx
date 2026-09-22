@@ -1,5 +1,4 @@
 import { trpc } from "@/lib/trpc";
-import { firebaseAuth } from "@/lib/firebase";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink, TRPCClientError } from "@trpc/client";
 import { createRoot } from "react-dom/client";
@@ -37,12 +36,6 @@ const trpcClient = trpc.createClient({
     httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,
-      async headers() {
-        const user = firebaseAuth.currentUser;
-        if (!user) return {};
-        const token = await user.getIdToken();
-        return { Authorization: `Bearer ${token}` };
-      },
       fetch(input, init) {
         return globalThis.fetch(input, {
           ...(init ?? {}),

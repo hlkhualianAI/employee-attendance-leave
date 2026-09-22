@@ -1,7 +1,5 @@
-import { firebaseAuth } from "@/lib/firebase";
 import { trpc } from "@/lib/trpc";
-import { onAuthStateChanged, signOut, type User as FirebaseUser } from "firebase/auth";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 
 type UseAuthOptions = {
   redirectOnUnauthenticated?: boolean;
@@ -9,31 +7,20 @@ type UseAuthOptions = {
 };
 
 export function useAuth(_options?: UseAuthOptions) {
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const meQuery = trpc.auth.me.useQuery(undefined, {
-    enabled: Boolean(firebaseUser),
-    retry: false,
-    refetchOnWindowFocus: false,
-  });
+  const meQuery = trpc.auth.me.useQuery();
+  const logoutMutation = trpc.auth.logout.useMutation();
   const utils = trpc.useUtils();
 
-  useEffect(() => onAuthStateChanged(firebaseAuth, user => {
-    setFirebaseUser(user);
-    setAuthLoading(false);
-    if (!user) utils.auth.me.setData(undefined, null);
-  }), [utils]);
-
   const logout = useCallback(async () => {
-    await signOut(firebaseAuth);
+    await logoutMutation.mutateAsync();
     utils.auth.me.setData(undefined, null);
-  }, [utils]);
+  }, [logoutMutation, utils]);
 
   return {
     user: meQuery.data ?? null,
-    loading: authLoading || (Boolean(firebaseUser) && meQuery.isLoading),
+    loading: meQuery.isLoading,
     error: meQuery.error ?? null,
-    isAuthenticated: Boolean(firebaseUser && meQuery.data),
+    isAuthenticated: Boolean(meQuery.data),
     refresh: () => meQuery.refetch(),
     logout,
   };

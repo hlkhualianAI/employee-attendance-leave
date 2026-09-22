@@ -23,9 +23,12 @@ import {
   getLeaveRequests,
   getLeaveRequestsByMonth,
   getLeaveRequestsByRange,
+  getLocalUserByIdentifier,
   getRecentAttendance,
   getUserById,
   getUsers,
+  ensurePrimaryAdmin,
+  markLocalUserSignedIn,
   bindEmployeeDevice,
   linkEmployeeUser,
   updateLeaveStatus,
@@ -33,6 +36,9 @@ import {
   updateUserRole,
 } from "./db";
 import { countWeekdays, getBangkokDate } from "./attendance.logic";
+import { createSessionToken, verifyPin } from "./local-auth";
+import { getLocalAuthSecret, SESSION_COOKIE } from "./_core/context";
+import { serialize } from "cookie";
 
 const dateString = z
   .string()
@@ -82,7 +88,36 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
-    logout: publicProcedure.mutation(() => ({ success: true }) as const),
+    login: publicProcedure
+      .input(z.object({ identifier: z.string().min(1).max(160), pin: z.string().min(4).max(128) }))
+      .mutation(async ({ input, ctx }) => {
+        await ensurePrimaryAdmin();
+        const account = await getLocalUserByIdentifier(input.identifier);
+        if (!account || !verifyPin(input.pin, String(account.pinHash ?? ""))) {
+          throw new TRPCError({ code: "UNAUTHORIZED", message: "รหัสพนักงานหรือ PIN ไม่ถูกต้อง" });
+        }
+        await markLocalUserSignedIn(account.id);
+        ctx.res.setHeader("Set-Cookie", serialize(SESSION_COOKIE, createSessionToken(account.id, getLocalAuthSecret()), {
+          httpOnly: true,
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === "production",
+          path: "/",
+          maxAge: 60 * 60 * 24 * 7,
+        }));
+        return { success: true } as const;
+    }),
+    logout: publicProcedure.mutation(({ ctx }) => {
+      if (typeof ctx.res.setHeader === "function") {
+        ctx.res.setHeader("Set-Cookie", serialize(SESSION_COOKIE, "", {
+          httpOnly: true,
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === "production",
+          path: "/",
+          maxAge: 0,
+        }));
+      }
+      return { success: true } as const;
+    }),
   }),
   users: router({
     list: adminProcedure.query(() => getUsers()),
@@ -113,6 +148,7 @@ export const appRouter = router({
           workStartMin: z.number().int().min(0).max(1439).optional(),
           workEndMin: z.number().int().min(0).max(1439).optional(),
           userId: z.number().int().positive().optional(),
+          pin: z.string().min(4).max(128),
         })
       )
       .mutation(({ input }) => createEmployee(input)),

@@ -1,37 +1,25 @@
-import { firebaseAuth } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
 import { useState } from "react";
+import { trpc } from "@/lib/trpc";
 
 export default function FirebaseLogin() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [registering, setRegistering] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [identifier, setIdentifier] = useState("");
+  const [pin, setPin] = useState("");
   const [error, setError] = useState("");
+  const utils = trpc.useUtils();
+  const loginMutation = trpc.auth.login.useMutation({
+    onSuccess: async () => {
+      await utils.auth.me.invalidate();
+    },
+    onError: loginError => setError(loginError.message || "เข้าสู่ระบบไม่สำเร็จ"),
+  });
 
-  async function submit(event: React.FormEvent) {
+  function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    setBusy(true);
-    try {
-      if (registering) {
-        await createUserWithEmailAndPassword(firebaseAuth, email.trim(), password);
-      } else {
-        await signInWithEmailAndPassword(firebaseAuth, email.trim(), password);
-      }
-    } catch (reason: unknown) {
-      const code = reason instanceof Error ? reason.message : "";
-      if (code.includes("auth/invalid-credential")) setError("อีเมลหรือรหัสผ่านไม่ถูกต้อง");
-      else if (code.includes("auth/email-already-in-use")) setError("อีเมลนี้ถูกใช้งานแล้ว");
-      else if (code.includes("auth/weak-password")) setError("รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร");
-      else if (code.includes("auth/invalid-email")) setError("รูปแบบอีเมลไม่ถูกต้อง");
-      else setError("เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบการเปิด Email/Password ใน Firebase");
-    } finally {
-      setBusy(false);
-    }
+    loginMutation.mutate({ identifier: identifier.trim(), pin });
   }
 
   return (
@@ -39,22 +27,19 @@ export default function FirebaseLogin() {
       <form onSubmit={submit} className="w-full max-w-md space-y-6 rounded-2xl border bg-background p-8 shadow-sm">
         <div className="space-y-2 text-center">
           <p className="text-sm font-medium text-primary">TIMEKEEP</p>
-          <h1 className="text-2xl font-semibold">ระบบลงข้อมูลการเข้าทำงานของหัวเหรียญขอนแก่น</h1>
-          <p className="text-sm text-muted-foreground">เข้าสู่ระบบด้วยอีเมลและรหัสผ่านของคุณ</p>
+          <h1 className="text-2xl font-semibold">ระบบลงข้อมูลการเข้าทำงาน</h1>
+          <p className="text-sm text-muted-foreground">เข้าสู่ระบบด้วยรหัสพนักงานและ PIN</p>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="email">อีเมล</Label>
-          <Input id="email" type="email" autoComplete="email" required value={email} onChange={event => setEmail(event.target.value)} />
+          <Label htmlFor="identifier">รหัสพนักงาน หรืออีเมล Admin</Label>
+          <Input id="identifier" autoComplete="username" required value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="เช่น EMP-001 หรือ songwit.sont@gmail.com" />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="password">รหัสผ่าน</Label>
-          <Input id="password" type="password" autoComplete={registering ? "new-password" : "current-password"} minLength={6} required value={password} onChange={event => setPassword(event.target.value)} />
+          <Label htmlFor="pin">PIN</Label>
+          <Input id="pin" type="password" inputMode="numeric" autoComplete="current-password" minLength={4} required value={pin} onChange={event => setPin(event.target.value)} placeholder="กรอก PIN" />
         </div>
         {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
-        <Button type="submit" disabled={busy} className="w-full">{busy ? "กำลังดำเนินการ..." : registering ? "สร้างบัญชี" : "เข้าสู่ระบบ"}</Button>
-        <button type="button" className="w-full text-sm text-muted-foreground underline-offset-4 hover:underline" onClick={() => { setRegistering(value => !value); setError(""); }}>
-          {registering ? "มีบัญชีแล้ว? เข้าสู่ระบบ" : "ยังไม่มีบัญชี? สร้างบัญชี"}
-        </button>
+        <Button type="submit" disabled={loginMutation.isPending} className="w-full">{loginMutation.isPending ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}</Button>
       </form>
     </div>
   );
