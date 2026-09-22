@@ -263,11 +263,12 @@ export async function getLocalUserByIdentifier(identifier: string) {
 export async function createLocalEmployeeAccount(input: {
   employeeCode: string;
   fullName: string;
+  email: string;
   pin: string;
   role?: User["role"];
 }) {
   const db = await getDb();
-  const existing = await getLocalUserByIdentifier(input.employeeCode);
+  const existing = await getLocalUserByIdentifier(input.email) ?? await getLocalUserByIdentifier(input.employeeCode);
   if (existing) throw new Error("รหัสพนักงานนี้มีบัญชีผู้ใช้แล้ว");
   const id = await allocateId("users");
   const now = new Date();
@@ -275,7 +276,7 @@ export async function createLocalEmployeeAccount(input: {
     id,
     openId: `local:${input.employeeCode}`,
     name: input.fullName,
-    email: null,
+    email: input.email.trim().toLowerCase(),
     employeeCode: input.employeeCode,
     pinHash: hashPin(input.pin),
     loginMethod: "local",
@@ -342,6 +343,7 @@ export async function createEmployee(input: {
   workStartMin?: number;
   workEndMin?: number;
   userId?: number;
+  email: string;
   pin?: string;
 }) {
   const db = await getDb();
@@ -371,6 +373,7 @@ export async function createEmployee(input: {
   const account = await createLocalEmployeeAccount({
     employeeCode: input.employeeCode,
     fullName: input.fullName,
+    email: input.email,
     pin: input.pin ?? process.env.DEFAULT_EMPLOYEE_PIN ?? "123456",
   });
   employee.userId = account.id;
@@ -818,6 +821,7 @@ export async function seedDemoData() {
       department: "ฝ่ายขาย",
       position: "Sales Executive",
       startDate: "2024-01-08",
+      email: "emp001@example.com",
     },
     {
       employeeCode: "EMP-002",
@@ -825,6 +829,7 @@ export async function seedDemoData() {
       department: "ฝ่ายบุคคล",
       position: "HR Officer",
       startDate: "2024-02-01",
+      email: "emp002@example.com",
     },
     {
       employeeCode: "EMP-003",
@@ -832,6 +837,7 @@ export async function seedDemoData() {
       department: "ฝ่ายบัญชี",
       position: "Accountant",
       startDate: "2024-03-04",
+      email: "emp003@example.com",
     },
   ];
   for (const employee of demoEmployees) await createEmployee(employee);

@@ -404,7 +404,7 @@ async function getLocalUserByIdentifier(identifier) {
 }
 async function createLocalEmployeeAccount(input) {
   const db = await getDb();
-  const existing = await getLocalUserByIdentifier(input.employeeCode);
+  const existing = await getLocalUserByIdentifier(input.email) ?? await getLocalUserByIdentifier(input.employeeCode);
   if (existing) throw new Error("\u0E23\u0E2B\u0E31\u0E2A\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19\u0E19\u0E35\u0E49\u0E21\u0E35\u0E1A\u0E31\u0E0D\u0E0A\u0E35\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E41\u0E25\u0E49\u0E27");
   const id = await allocateId("users");
   const now = /* @__PURE__ */ new Date();
@@ -412,7 +412,7 @@ async function createLocalEmployeeAccount(input) {
     id,
     openId: `local:${input.employeeCode}`,
     name: input.fullName,
-    email: null,
+    email: input.email.trim().toLowerCase(),
     employeeCode: input.employeeCode,
     pinHash: hashPin(input.pin),
     loginMethod: "local",
@@ -423,6 +423,11 @@ async function createLocalEmployeeAccount(input) {
   };
   await db.collection("users").doc(String(id)).set(account);
   return mapUser(account);
+}
+async function updateLocalUserPin(userId, pin) {
+  const snapshot = await (await getDb()).collection("users").where("id", "==", userId).limit(1).get();
+  if (!snapshot.docs[0]) throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E1A\u0E31\u0E0D\u0E0A\u0E35\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49");
+  await snapshot.docs[0].ref.update({ pinHash: hashPin(pin), updatedAt: /* @__PURE__ */ new Date() });
 }
 async function markLocalUserSignedIn(userId) {
   const snapshot = await (await getDb()).collection("users").where("id", "==", userId).limit(1).get();
@@ -467,6 +472,7 @@ async function createEmployee(input) {
   const account = await createLocalEmployeeAccount({
     employeeCode: input.employeeCode,
     fullName: input.fullName,
+    email: input.email,
     pin: input.pin ?? process.env.DEFAULT_EMPLOYEE_PIN ?? "123456"
   });
   employee.userId = account.id;
@@ -783,7 +789,7 @@ var appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
-    login: publicProcedure.input(z2.object({ identifier: z2.string().min(1).max(160), pin: z2.string().min(4).max(128) })).mutation(async ({ input, ctx }) => {
+    login: publicProcedure.input(z2.object({ identifier: z2.string().email().max(160), pin: z2.string().min(4).max(128) })).mutation(async ({ input, ctx }) => {
       await ensurePrimaryAdmin();
       const account = await getLocalUserByIdentifier(input.identifier);
       if (!account || !verifyPin(input.pin, String(account.pinHash ?? ""))) {
@@ -810,6 +816,13 @@ var appRouter = router({
         }));
       }
       return { success: true };
+    }),
+    setPin: protectedProcedure.input(z2.object({ userId: z2.number().int().positive().optional(), pin: z2.string().min(4).max(128) })).mutation(({ input, ctx }) => {
+      const targetId = input.userId ?? ctx.user.id;
+      if (targetId !== ctx.user.id && effectiveRole(ctx.user.role) !== "admin") {
+        throw new TRPCError2({ code: "FORBIDDEN", message: "\u0E40\u0E09\u0E1E\u0E32\u0E30 Admin \u0E40\u0E17\u0E48\u0E32\u0E19\u0E31\u0E49\u0E19\u0E17\u0E35\u0E48\u0E15\u0E31\u0E49\u0E07 PIN \u0E43\u0E2B\u0E49\u0E1A\u0E31\u0E0D\u0E0A\u0E35\u0E2D\u0E37\u0E48\u0E19\u0E44\u0E14\u0E49" });
+      }
+      return updateLocalUserPin(targetId, input.pin);
     })
   }),
   users: router({
@@ -838,6 +851,7 @@ var appRouter = router({
         workStartMin: z2.number().int().min(0).max(1439).optional(),
         workEndMin: z2.number().int().min(0).max(1439).optional(),
         userId: z2.number().int().positive().optional(),
+        email: z2.string().email().max(160),
         pin: z2.string().min(4).max(128)
       })
     ).mutation(({ input }) => createEmployee(input)),

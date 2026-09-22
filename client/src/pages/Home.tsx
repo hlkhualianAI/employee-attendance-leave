@@ -260,6 +260,7 @@ export default function Home() {
   const [employeeForm, setEmployeeForm] = useState({
     employeeCode: "",
     fullName: "",
+    email: "",
     pin: "",
     department: "",
     position: "",
@@ -278,6 +279,7 @@ export default function Home() {
     "idle" | "requesting" | "ready" | "error"
   >("idle");
   const [location, setLocation] = useState<Coordinates | null>(null);
+  const [pinForm, setPinForm] = useState("");
 
   const utils = trpc.useUtils();
   const employeesQuery = trpc.employees.list.useQuery();
@@ -310,6 +312,7 @@ export default function Home() {
       setEmployeeForm({
         employeeCode: "",
         fullName: "",
+        email: "",
         pin: "",
         department: "",
         position: "",
@@ -320,6 +323,14 @@ export default function Home() {
       void utils.attendance.summary.invalidate();
     },
     onError: error => toast.error(error.message || "เพิ่มพนักงานไม่สำเร็จ"),
+  });
+
+  const setPinMutation = trpc.auth.setPin.useMutation({
+    onSuccess: () => {
+      toast.success("ตั้ง PIN ใหม่เรียบร้อยแล้ว");
+      setPinForm("");
+    },
+    onError: error => toast.error(error.message || "ตั้ง PIN ไม่สำเร็จ"),
   });
 
   const updateEmployeeMutation = trpc.employees.update.useMutation({
@@ -1243,6 +1254,18 @@ export default function Home() {
                       placeholder="ชื่อพนักงาน"
                     />
                   </FormField>
+                  <FormField label="อีเมลสำหรับเข้าสู่ระบบ">
+                    <Input
+                      required
+                      type="email"
+                      autoComplete="email"
+                      value={employeeForm.email}
+                      onChange={event =>
+                        setEmployeeForm({ ...employeeForm, email: event.target.value })
+                      }
+                      placeholder="employee@example.com"
+                    />
+                  </FormField>
                   <FormField label="PIN สำหรับเข้าสู่ระบบ">
                     <Input
                       required
@@ -1350,6 +1373,28 @@ export default function Home() {
                     )}{" "}
                     น.
                   </p>
+                  <form
+                    className="mt-4 space-y-2 border-t border-[#edf2ed] pt-4"
+                    onSubmit={event => {
+                      event.preventDefault();
+                      setPinMutation.mutate({ pin: pinForm });
+                    }}
+                  >
+                    <Label htmlFor="my-pin">ตั้ง/เปลี่ยน PIN</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="my-pin"
+                        type="password"
+                        inputMode="numeric"
+                        minLength={4}
+                        required
+                        value={pinForm}
+                        onChange={event => setPinForm(event.target.value)}
+                        placeholder="อย่างน้อย 4 หลัก"
+                      />
+                      <Button type="submit" disabled={setPinMutation.isPending}>บันทึก</Button>
+                    </div>
+                  </form>
                 </div>
               ) : (
                 <p className="mt-5 rounded-2xl bg-white p-4 text-xs text-[#9b7a42]">

@@ -34,6 +34,7 @@ import {
   updateLeaveStatus,
   updateEmployee,
   updateUserRole,
+  updateLocalUserPin,
 } from "./db";
 import { countWeekdays, getBangkokDate } from "./attendance.logic";
 import { createSessionToken, verifyPin } from "./local-auth";
@@ -89,7 +90,7 @@ export const appRouter = router({
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     login: publicProcedure
-      .input(z.object({ identifier: z.string().min(1).max(160), pin: z.string().min(4).max(128) }))
+      .input(z.object({ identifier: z.string().email().max(160), pin: z.string().min(4).max(128) }))
       .mutation(async ({ input, ctx }) => {
         await ensurePrimaryAdmin();
         const account = await getLocalUserByIdentifier(input.identifier);
@@ -118,6 +119,15 @@ export const appRouter = router({
       }
       return { success: true } as const;
     }),
+    setPin: protectedProcedure
+      .input(z.object({ userId: z.number().int().positive().optional(), pin: z.string().min(4).max(128) }))
+      .mutation(({ input, ctx }) => {
+        const targetId = input.userId ?? ctx.user.id;
+        if (targetId !== ctx.user.id && effectiveRole(ctx.user.role) !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "เฉพาะ Admin เท่านั้นที่ตั้ง PIN ให้บัญชีอื่นได้" });
+        }
+        return updateLocalUserPin(targetId, input.pin);
+      }),
   }),
   users: router({
     list: adminProcedure.query(() => getUsers()),
@@ -148,6 +158,7 @@ export const appRouter = router({
           workStartMin: z.number().int().min(0).max(1439).optional(),
           workEndMin: z.number().int().min(0).max(1439).optional(),
           userId: z.number().int().positive().optional(),
+          email: z.string().email().max(160),
           pin: z.string().min(4).max(128),
         })
       )

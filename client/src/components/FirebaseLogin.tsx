@@ -28,11 +28,11 @@ export default function FirebaseLogin() {
         <div className="space-y-2 text-center">
           <p className="text-sm font-medium text-primary">TIMEKEEP</p>
           <h1 className="text-2xl font-semibold">ระบบลงข้อมูลการเข้าทำงาน</h1>
-          <p className="text-sm text-muted-foreground">เข้าสู่ระบบด้วยรหัสพนักงานและ PIN</p>
+          <p className="text-sm text-muted-foreground">เข้าสู่ระบบด้วยอีเมลและ PIN</p>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="identifier">รหัสพนักงาน หรืออีเมล Admin</Label>
-          <Input id="identifier" autoComplete="username" required value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="เช่น EMP-001 หรือ songwit.sont@gmail.com" />
+          <Label htmlFor="identifier">อีเมล</Label>
+          <Input id="identifier" type="email" autoComplete="email" required value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="เช่น songwit.sont@gmail.com" />
         </div>
         <div className="space-y-2">
           <Label htmlFor="pin">PIN</Label>
