@@ -133,6 +133,23 @@ function displayTime(timestamp: number | null | undefined) {
     minute: "2-digit",
   }).format(new Date(timestamp));
 }
+function datetimeLocalValue(timestamp: number | null | undefined) {
+  if (!timestamp) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(timestamp));
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
+}
+function timestampFromDatetimeLocal(value: string) {
+  return value ? Date.parse(`${value}:00+07:00`) : null;
+}
 
 function tenureLabel(createdAt: number) {
   const start = new Date(createdAt);
@@ -280,6 +297,12 @@ export default function Home() {
   >("idle");
   const [location, setLocation] = useState<Coordinates | null>(null);
   const [pinForm, setPinForm] = useState("");
+  const [editingAttendanceId, setEditingAttendanceId] = useState<number | null>(null);
+  const [attendanceEditForm, setAttendanceEditForm] = useState({
+    checkInAt: "",
+    checkOutAt: "",
+    note: "",
+  });
 
   const utils = trpc.useUtils();
   const employeesQuery = trpc.employees.list.useQuery();
@@ -368,6 +391,20 @@ export default function Home() {
       void utils.attendance.recent.invalidate();
     },
     onError: error => toast.error(error.message || "เช็คเอาต์ไม่สำเร็จ"),
+  });
+
+  const updateAttendanceTimeMutation = trpc.attendance.updateTime.useMutation({
+    onSuccess: result => {
+      toast.success(
+        `แก้ไขเวลาเรียบร้อยแล้ว${result.lateMinutes > 0 ? ` · มาสาย ${result.lateMinutes} นาที` : ""}`
+      );
+      setEditingAttendanceId(null);
+      void utils.attendance.recent.invalidate();
+      void utils.attendance.byDate.invalidate();
+      void utils.attendance.summary.invalidate();
+      void utils.attendance.reportRange.invalidate();
+    },
+    onError: error => toast.error(error.message || "แก้ไขเวลาไม่สำเร็จ"),
   });
 
   const createLeaveMutation = trpc.leave.create.useMutation({
@@ -1032,6 +1069,7 @@ export default function Home() {
                       <th className="pb-3 font-medium">เข้า</th>
                       <th className="pb-3 font-medium">ออก</th>
                       <th className="pb-3 text-right font-medium">สถานะ</th>
+                      {isAdmin && <th className="pb-3 text-right font-medium">จัดการ</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -1081,6 +1119,79 @@ export default function Home() {
                             </span>
                           )}
                         </td>
+                        {isAdmin && (
+                          <td className="py-4 text-right align-top">
+                            {editingAttendanceId === record.id ? (
+                              <form
+                                className="ml-auto flex w-64 flex-col gap-2 rounded-xl border border-[#d9e5dc] bg-[#f8fbf8] p-3 text-left"
+                                onSubmit={event => {
+                                  event.preventDefault();
+                                  const checkInAt = timestampFromDatetimeLocal(attendanceEditForm.checkInAt);
+                                  const checkOutAt = timestampFromDatetimeLocal(attendanceEditForm.checkOutAt);
+                                  if (checkInAt === null) {
+                                    toast.error("กรุณาระบุเวลาเช็คอิน");
+                                    return;
+                                  }
+                                  updateAttendanceTimeMutation.mutate({
+                                    id: record.id,
+                                    checkInAt,
+                                    checkOutAt,
+                                    note: attendanceEditForm.note || undefined,
+                                  });
+                                }}
+                              >
+                                <label className="text-[11px] font-medium text-[#5d756d]">
+                                  เวลาเข้า
+                                  <Input
+                                    type="datetime-local"
+                                    className="mt-1 h-8 text-xs"
+                                    value={attendanceEditForm.checkInAt}
+                                    onChange={event => setAttendanceEditForm({ ...attendanceEditForm, checkInAt: event.target.value })}
+                                  />
+                                </label>
+                                <label className="text-[11px] font-medium text-[#5d756d]">
+                                  เวลาออก
+                                  <Input
+                                    type="datetime-local"
+                                    className="mt-1 h-8 text-xs"
+                                    value={attendanceEditForm.checkOutAt}
+                                    onChange={event => setAttendanceEditForm({ ...attendanceEditForm, checkOutAt: event.target.value })}
+                                  />
+                                </label>
+                                <Input
+                                  className="h-8 text-xs"
+                                  placeholder="หมายเหตุการแก้ไข"
+                                  value={attendanceEditForm.note}
+                                  onChange={event => setAttendanceEditForm({ ...attendanceEditForm, note: event.target.value })}
+                                />
+                                <div className="flex gap-2">
+                                  <Button type="submit" size="sm" className="h-8 flex-1 bg-[#2f7564] text-xs hover:bg-[#276355]" disabled={updateAttendanceTimeMutation.isPending}>
+                                    บันทึก
+                                  </Button>
+                                  <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setEditingAttendanceId(null)}>
+                                    ยกเลิก
+                                  </Button>
+                                </div>
+                              </form>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-[#cfe0d5] text-xs text-[#477461]"
+                                onClick={() => {
+                                  setEditingAttendanceId(record.id);
+                                  setAttendanceEditForm({
+                                    checkInAt: datetimeLocalValue(record.checkInAt),
+                                    checkOutAt: datetimeLocalValue(record.checkOutAt),
+                                    note: record.note ?? "",
+                                  });
+                                }}
+                              >
+                                <Pencil className="mr-1 h-3.5 w-3.5" /> แก้เวลา
+                              </Button>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

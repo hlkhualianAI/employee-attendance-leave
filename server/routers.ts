@@ -25,6 +25,7 @@ import {
   getLeaveRequestsByRange,
   getLocalUserByIdentifier,
   getRecentAttendance,
+  updateAttendanceTime,
   getUserById,
   getUsers,
   ensurePrimaryAdmin,
@@ -350,6 +351,18 @@ export const appRouter = router({
         );
         return checkOutEmployee(input.employeeId, getBangkokDate(), Date.now());
       }),
+    updateTime: adminProcedure
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          checkInAt: z.number().int().nonnegative().nullable(),
+          checkOutAt: z.number().int().nonnegative().nullable(),
+          note: z.string().max(500).optional(),
+        })
+      )
+      .mutation(({ input, ctx }) =>
+        updateAttendanceTime({ ...input, updatedByUserId: ctx.user.id })
+      ),
   }),
   leave: router({
     list: staffProcedure.query(({ ctx }) =>

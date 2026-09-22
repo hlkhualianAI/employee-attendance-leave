@@ -692,6 +692,28 @@ async function checkOutEmployee(employeeId, workDate, timestamp) {
   await ref.update({ checkOutAt: timestamp, updatedAt: Date.now() });
   return { id: employeeId };
 }
+async function updateAttendanceTime(input) {
+  if (input.checkInAt !== null && input.checkOutAt !== null && input.checkOutAt < input.checkInAt) {
+    throw new Error("\u0E40\u0E27\u0E25\u0E32\u0E40\u0E0A\u0E47\u0E04\u0E40\u0E2D\u0E32\u0E15\u0E4C\u0E15\u0E49\u0E2D\u0E07\u0E44\u0E21\u0E48\u0E40\u0E23\u0E47\u0E27\u0E01\u0E01\u0E27\u0E48\u0E32\u0E40\u0E27\u0E25\u0E32\u0E40\u0E0A\u0E47\u0E04\u0E2D\u0E34\u0E19");
+  }
+  const db = await getDb();
+  const snapshot = await db.collection("attendance").where("id", "==", input.id).limit(1).get();
+  const ref = snapshot.docs[0]?.ref;
+  if (!ref) throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E25\u0E07\u0E40\u0E27\u0E25\u0E32");
+  const current = mapAttendance(snapshot.docs[0].data());
+  const employee = (await getEmployees()).find((row) => row.id === current.employeeId);
+  if (!employee) throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19\u0E02\u0E2D\u0E07\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E25\u0E07\u0E40\u0E27\u0E25\u0E32");
+  const lateMinutes = input.checkInAt === null ? 0 : calculateLateMinutes(input.checkInAt, employee.workStartMin);
+  await ref.update({
+    checkInAt: input.checkInAt,
+    checkOutAt: input.checkOutAt,
+    lateMinutes,
+    note: input.note?.trim() || null,
+    recordedByUserId: input.updatedByUserId,
+    updatedAt: Date.now()
+  });
+  return { id: input.id, lateMinutes };
+}
 async function createLeaveRequest(input) {
   const db = await getDb();
   const id = await allocateId("leaveRequests");
@@ -1075,7 +1097,17 @@ var appRouter = router({
         ctx.user.role
       );
       return checkOutEmployee(input.employeeId, getBangkokDate(), Date.now());
-    })
+    }),
+    updateTime: adminProcedure2.input(
+      z2.object({
+        id: z2.number().int().positive(),
+        checkInAt: z2.number().int().nonnegative().nullable(),
+        checkOutAt: z2.number().int().nonnegative().nullable(),
+        note: z2.string().max(500).optional()
+      })
+    ).mutation(
+      ({ input, ctx }) => updateAttendanceTime({ ...input, updatedByUserId: ctx.user.id })
+    )
   }),
   leave: router({
     list: staffProcedure.query(

@@ -774,6 +774,45 @@ export async function checkOutEmployee(
   return { id: employeeId };
 }
 
+export async function updateAttendanceTime(input: {
+  id: number;
+  checkInAt: number | null;
+  checkOutAt: number | null;
+  note?: string | null;
+  updatedByUserId: number;
+}) {
+  if (
+    input.checkInAt !== null &&
+    input.checkOutAt !== null &&
+    input.checkOutAt < input.checkInAt
+  ) {
+    throw new Error("เวลาเช็คเอาต์ต้องไม่ก่อนเวลาเช็คอิน");
+  }
+  const db = await getDb();
+  const snapshot = await db
+    .collection("attendance")
+    .where("id", "==", input.id)
+    .limit(1)
+    .get();
+  const ref = snapshot.docs[0]?.ref;
+  if (!ref) throw new Error("ไม่พบรายการลงเวลา");
+  const current = mapAttendance(snapshot.docs[0].data() as FirestoreRecord);
+  const employee = (await getEmployees()).find(row => row.id === current.employeeId);
+  if (!employee) throw new Error("ไม่พบข้อมูลพนักงานของรายการลงเวลา");
+  const lateMinutes = input.checkInAt === null
+    ? 0
+    : calculateLateMinutes(input.checkInAt, employee.workStartMin);
+  await ref.update({
+    checkInAt: input.checkInAt,
+    checkOutAt: input.checkOutAt,
+    lateMinutes,
+    note: input.note?.trim() || null,
+    recordedByUserId: input.updatedByUserId,
+    updatedAt: Date.now(),
+  });
+  return { id: input.id, lateMinutes };
+}
+
 export async function createLeaveRequest(input: {
   employeeId: number;
   leaveType: "annual" | "sick" | "personal" | "other";
