@@ -40,6 +40,7 @@ import { countWeekdays, getBangkokDate } from "./attendance.logic";
 import { createSessionToken, verifyPin } from "./local-auth";
 import { getLocalAuthSecret, SESSION_COOKIE } from "./_core/context";
 import { serialize } from "cookie";
+import { notifyLateCheckIn, notifyLeaveCreated, notifyLeaveStatus } from "./line-notify";
 
 const dateString = z
   .string()
@@ -324,7 +325,8 @@ export const appRouter = router({
           if (!employee.deviceId)
             await bindEmployeeDevice(employee.id, input.deviceId);
         }
-        return checkInEmployee(input.employeeId, getBangkokDate(), Date.now(), {
+        const checkInAt = Date.now();
+        const result = await checkInEmployee(input.employeeId, getBangkokDate(), checkInAt, {
           checkInMode: input.checkInMode,
           latitude: input.latitude,
           longitude: input.longitude,
@@ -332,6 +334,11 @@ export const appRouter = router({
           recordedByUserId: ctx.user.id,
           note: input.note?.trim() || undefined,
         });
+        if (result.lateMinutes > 0) {
+          const employee = (await getEmployees()).find(row => row.id === input.employeeId);
+          if (employee) void notifyLateCheckIn(employee, getBangkokDate(), checkInAt, result.lateMinutes);
+        }
+        return result;
       }),
     checkOut: staffProcedure
       .input(z.object({ employeeId: z.number().int().positive() }))
@@ -375,7 +382,10 @@ export const appRouter = router({
             message: "จำนวนวันลาหรือช่วงวันที่ไม่ถูกต้อง",
           });
         }
-        return createLeaveRequest({ ...input, totalDays: calculatedDays });
+        const leave = await createLeaveRequest({ ...input, totalDays: calculatedDays });
+        const employee = (await getEmployees()).find(row => row.id === input.employeeId);
+        if (employee) void notifyLeaveCreated(employee, leave);
+        return leave;
       }),
     updateStatus: peopleOpsProcedure
       .input(
@@ -384,7 +394,14 @@ export const appRouter = router({
           status: z.enum(["pending", "approved", "rejected"]),
         })
       )
-      .mutation(({ input }) => updateLeaveStatus(input.id, input.status)),
+      .mutation(async ({ input }) => {
+        const existing = (await getLeaveRequests(1000)).find(row => row.id === input.id);
+        const result = await updateLeaveStatus(input.id, input.status);
+        if (existing && (input.status === "approved" || input.status === "rejected")) {
+          void notifyLeaveStatus(existing, existing, input.status);
+        }
+        return result;
+      }),
   }),
 });
 

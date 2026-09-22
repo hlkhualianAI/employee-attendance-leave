@@ -729,6 +729,85 @@ async function createContext(opts) {
 
 // server/routers.ts
 import { serialize } from "cookie";
+
+// server/line-notify.ts
+var leaveLabels = {
+  annual: "\u0E25\u0E32\u0E1E\u0E31\u0E01\u0E23\u0E49\u0E2D\u0E19",
+  sick: "\u0E25\u0E32\u0E1B\u0E48\u0E27\u0E22",
+  personal: "\u0E25\u0E32\u0E01\u0E34\u0E08",
+  other: "\u0E25\u0E32\u0E2D\u0E37\u0E48\u0E19 \u0E46"
+};
+function formatMinutes(minutes = 0) {
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")} \u0E19.`;
+}
+async function sendLineGroupMessage(text) {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const groupId = process.env.LINE_GROUP_ID;
+  if (!token || !groupId) {
+    console.warn("[LINE] Notifications are disabled: missing LINE_CHANNEL_ACCESS_TOKEN or LINE_GROUP_ID");
+    return false;
+  }
+  try {
+    const response = await fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ to: groupId, messages: [{ type: "text", text }] })
+    });
+    if (!response.ok) {
+      console.warn(`[LINE] Notification failed with HTTP ${response.status}: ${await response.text()}`);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.warn("[LINE] Notification request failed:", error);
+    return false;
+  }
+}
+function notifyLateCheckIn(employee, workDate, checkInAt, lateMinutes) {
+  if (lateMinutes <= 0) return Promise.resolve(false);
+  const workStart = formatMinutes(employee.workStartMin);
+  const checkIn = new Intl.DateTimeFormat("th-TH", {
+    timeZone: "Asia/Bangkok",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(new Date(checkInAt));
+  return sendLineGroupMessage([
+    "\u0E41\u0E08\u0E49\u0E07\u0E40\u0E15\u0E37\u0E2D\u0E19\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19\u0E21\u0E32\u0E2A\u0E32\u0E22",
+    `\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48: ${workDate}`,
+    `\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19: ${employee.fullName}`,
+    `\u0E23\u0E2B\u0E31\u0E2A\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19: ${employee.employeeCode}`,
+    `\u0E40\u0E27\u0E25\u0E32\u0E40\u0E23\u0E34\u0E48\u0E21\u0E07\u0E32\u0E19: ${workStart}`,
+    `\u0E40\u0E27\u0E25\u0E32\u0E40\u0E0A\u0E47\u0E04\u0E2D\u0E34\u0E19: ${checkIn} \u0E19.`,
+    `\u0E21\u0E32\u0E2A\u0E32\u0E22: ${lateMinutes} \u0E19\u0E32\u0E17\u0E35`
+  ].join("\n"));
+}
+function notifyLeaveCreated(employee, leave) {
+  return sendLineGroupMessage([
+    "\u0E41\u0E08\u0E49\u0E07\u0E40\u0E15\u0E37\u0E2D\u0E19\u0E04\u0E33\u0E02\u0E2D\u0E25\u0E32\u0E43\u0E2B\u0E21\u0E48",
+    `\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19: ${employee.fullName}`,
+    `\u0E23\u0E2B\u0E31\u0E2A\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19: ${employee.employeeCode}`,
+    `\u0E1B\u0E23\u0E30\u0E40\u0E20\u0E17\u0E25\u0E32: ${leaveLabels[leave.leaveType] ?? leave.leaveType}`,
+    `\u0E0A\u0E48\u0E27\u0E07\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48: ${leave.startDate} \u0E16\u0E36\u0E07 ${leave.endDate}`,
+    `\u0E08\u0E33\u0E19\u0E27\u0E19\u0E27\u0E31\u0E19: ${leave.totalDays} \u0E27\u0E31\u0E19`,
+    ...leave.reason ? [`\u0E40\u0E2B\u0E15\u0E38\u0E1C\u0E25: ${leave.reason}`] : []
+  ].join("\n"));
+}
+function notifyLeaveStatus(employee, leave, status) {
+  return sendLineGroupMessage([
+    status === "approved" ? "\u0E41\u0E08\u0E49\u0E07\u0E40\u0E15\u0E37\u0E2D\u0E19\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E27\u0E31\u0E19\u0E25\u0E32" : "\u0E41\u0E08\u0E49\u0E07\u0E40\u0E15\u0E37\u0E2D\u0E19\u0E44\u0E21\u0E48\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E27\u0E31\u0E19\u0E25\u0E32",
+    `\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19: ${employee.fullName}`,
+    `\u0E23\u0E2B\u0E31\u0E2A\u0E1E\u0E19\u0E31\u0E01\u0E07\u0E32\u0E19: ${employee.employeeCode}`,
+    `\u0E1B\u0E23\u0E30\u0E40\u0E20\u0E17\u0E25\u0E32: ${leaveLabels[leave.leaveType] ?? leave.leaveType}`,
+    `\u0E0A\u0E48\u0E27\u0E07\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48: ${leave.startDate} \u0E16\u0E36\u0E07 ${leave.endDate}`,
+    `\u0E08\u0E33\u0E19\u0E27\u0E19\u0E27\u0E31\u0E19: ${leave.totalDays} \u0E27\u0E31\u0E19`,
+    `\u0E1C\u0E25\u0E01\u0E32\u0E23\u0E1E\u0E34\u0E08\u0E32\u0E23\u0E13\u0E32: ${status === "approved" ? "\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34" : "\u0E44\u0E21\u0E48\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34"}`
+  ].join("\n"));
+}
+
+// server/routers.ts
 var dateString = z2.string().regex(/^\d{4}-\d{2}-\d{2}$/, "\u0E23\u0E39\u0E1B\u0E41\u0E1A\u0E1A\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07");
 var roleSchema = z2.enum(["admin", "hr", "employee"]);
 function effectiveRole(role) {
@@ -974,7 +1053,8 @@ var appRouter = router({
         if (!employee.deviceId)
           await bindEmployeeDevice(employee.id, input.deviceId);
       }
-      return checkInEmployee(input.employeeId, getBangkokDate(), Date.now(), {
+      const checkInAt = Date.now();
+      const result = await checkInEmployee(input.employeeId, getBangkokDate(), checkInAt, {
         checkInMode: input.checkInMode,
         latitude: input.latitude,
         longitude: input.longitude,
@@ -982,6 +1062,11 @@ var appRouter = router({
         recordedByUserId: ctx.user.id,
         note: input.note?.trim() || void 0
       });
+      if (result.lateMinutes > 0) {
+        const employee = (await getEmployees()).find((row) => row.id === input.employeeId);
+        if (employee) void notifyLateCheckIn(employee, getBangkokDate(), checkInAt, result.lateMinutes);
+      }
+      return result;
     }),
     checkOut: staffProcedure.input(z2.object({ employeeId: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
       await assertEmployeeAccess(
@@ -1021,14 +1106,24 @@ var appRouter = router({
           message: "\u0E08\u0E33\u0E19\u0E27\u0E19\u0E27\u0E31\u0E19\u0E25\u0E32\u0E2B\u0E23\u0E37\u0E2D\u0E0A\u0E48\u0E27\u0E07\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07"
         });
       }
-      return createLeaveRequest({ ...input, totalDays: calculatedDays });
+      const leave = await createLeaveRequest({ ...input, totalDays: calculatedDays });
+      const employee = (await getEmployees()).find((row) => row.id === input.employeeId);
+      if (employee) void notifyLeaveCreated(employee, leave);
+      return leave;
     }),
     updateStatus: peopleOpsProcedure.input(
       z2.object({
         id: z2.number().int().positive(),
         status: z2.enum(["pending", "approved", "rejected"])
       })
-    ).mutation(({ input }) => updateLeaveStatus(input.id, input.status))
+    ).mutation(async ({ input }) => {
+      const existing = (await getLeaveRequests(1e3)).find((row) => row.id === input.id);
+      const result = await updateLeaveStatus(input.id, input.status);
+      if (existing && (input.status === "approved" || input.status === "rejected")) {
+        void notifyLeaveStatus(existing, existing, input.status);
+      }
+      return result;
+    })
   })
 });
 
