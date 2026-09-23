@@ -1220,6 +1220,10 @@ export default function Home() {
                         {displayDate(request.startDate)} —{" "}
                         {displayDate(request.endDate)}
                       </p>
+                      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-5 text-[#596d64]">
+                        <span className="font-semibold text-[#3f584d]">เหตุผล:</span>{" "}
+                        {request.reason?.trim() || "ไม่ได้ระบุเหตุผล"}
+                      </p>
                       {canManage && request.status === "pending" && (
                         <div className="mt-3 flex gap-2">
                           <Button
