@@ -93,20 +93,6 @@ const roleDescriptions: Record<AppRole, string> = {
   employee: "ดูข้อมูลของตนเอง เช็คอิน และส่งคำขอลา",
 };
 
-const monthNames = [
-  "มกราคม",
-  "กุมภาพันธ์",
-  "มีนาคม",
-  "เมษายน",
-  "พฤษภาคม",
-  "มิถุนายน",
-  "กรกฎาคม",
-  "สิงหาคม",
-  "กันยายน",
-  "ตุลาคม",
-  "พฤศจิกายน",
-  "ธันวาคม",
-];
 
 function bangkokDate(date = new Date()) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(
@@ -311,7 +297,6 @@ export default function Home() {
     month: selectedMonth,
   });
   const todayQuery = trpc.attendance.byDate.useQuery({ workDate: today });
-  const recentQuery = trpc.attendance.recent.useQuery();
   const leaveQuery = trpc.leave.list.useQuery();
   const reportQuery = trpc.attendance.reportRange.useQuery({
     startDate: rangeStart,
@@ -378,7 +363,7 @@ export default function Home() {
           : "เช็คอินสำเร็จ · ตรงเวลา"
       );
       void utils.attendance.byDate.invalidate();
-      void utils.attendance.recent.invalidate();
+      void utils.attendance.byDate.invalidate();
       void utils.attendance.summary.invalidate();
     },
     onError: error => toast.error(error.message || "เช็คอินไม่สำเร็จ"),
@@ -388,7 +373,6 @@ export default function Home() {
     onSuccess: () => {
       toast.success("บันทึกเวลาเช็คเอาต์แล้ว");
       void utils.attendance.byDate.invalidate();
-      void utils.attendance.recent.invalidate();
     },
     onError: error => toast.error(error.message || "เช็คเอาต์ไม่สำเร็จ"),
   });
@@ -399,7 +383,6 @@ export default function Home() {
         `แก้ไขเวลาเรียบร้อยแล้ว${result.lateMinutes > 0 ? ` · มาสาย ${result.lateMinutes} นาที` : ""}`
       );
       setEditingAttendanceId(null);
-      void utils.attendance.recent.invalidate();
       void utils.attendance.byDate.invalidate();
       void utils.attendance.summary.invalidate();
       void utils.attendance.reportRange.invalidate();
@@ -508,8 +491,6 @@ export default function Home() {
     checkInMutation.isPending ||
     checkOutMutation.isPending ||
     locationStatus === "requesting";
-  const currentMonthLabel =
-    monthNames[Number(selectedMonth.split("-")[1]) - 1] ?? "เดือนนี้";
   const hasLinkedProfile = role !== "employee" || Boolean(selectedEmployee);
 
   function handleCheckIn() {
@@ -734,7 +715,7 @@ export default function Home() {
               className="border-[#dfe5df] bg-white text-[#5d756d]"
               onClick={() => {
                 void utils.attendance.summary.invalidate();
-                void utils.attendance.recent.invalidate();
+                void utils.attendance.byDate.invalidate();
                 void utils.leave.list.invalidate();
               }}
               aria-label="รีเฟรชข้อมูล"
@@ -976,10 +957,9 @@ export default function Home() {
                           <p className="text-xs font-semibold text-[#60756d]">
                             {Number(date.slice(-2))}
                           </p>
-                          <div className="mt-2 space-y-1">
+                          <div className="mt-2 max-h-[220px] space-y-1 overflow-y-auto">
                             {attendance
                               .filter(row => row.lateMinutes > 0)
-                              .slice(0, 3)
                               .map(row => (
                                 <div
                                   key={`late-${row.employeeCode}`}
@@ -991,7 +971,6 @@ export default function Home() {
                               ))}
                             {attendance
                               .filter(row => row.lateMinutes <= 0)
-                              .slice(0, 2)
                               .map(row => (
                                 <div
                                   key={`present-${row.employeeCode}`}
@@ -1001,7 +980,7 @@ export default function Home() {
                                   เข้า · {row.fullName}
                                 </div>
                               ))}
-                            {leaves.slice(0, 2).map(row => (
+                            {leaves.map(row => (
                               <div
                                 key={`leave-${row.employeeCode}-${row.startDate}`}
                                 className={`truncate rounded-md px-1.5 py-1 text-[10px] font-semibold ${row.status === "approved" ? "bg-[#eef0ff] text-[#626ca8]" : "bg-[#f3f0ff] text-[#8174ae]"}`}
@@ -1010,20 +989,6 @@ export default function Home() {
                                 ลา · {row.fullName}
                               </div>
                             ))}
-                            {attendance.filter(row => row.lateMinutes > 0)
-                              .length > 3 && (
-                              <p className="text-[10px] text-[#a28c7c]">
-                                +
-                                {attendance.filter(row => row.lateMinutes > 0)
-                                  .length - 3}{" "}
-                                รายการ
-                              </p>
-                            )}
-                            {leaves.length > 2 && (
-                              <p className="text-[10px] text-[#8c86a5]">
-                                +{leaves.length - 2} วันลา
-                              </p>
-                            )}
                           </div>
                         </>
                       )}
@@ -1045,25 +1010,25 @@ export default function Home() {
             <div className="mb-5 flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#91a19a]">
-                  ล่าสุด
+                  วันนี้
                 </p>
                 <h2 className="mt-1 font-display text-xl font-semibold text-[#29443d]">
                   {role === "employee"
-                    ? "ประวัติการลงเวลาของฉัน"
-                    : "การลงเวลาเข้าออก"}
+                    ? "การลงเวลาของฉันวันนี้"
+                    : "การลงเวลาเข้าออกวันนี้"}
                 </h2>
               </div>
               <div className="rounded-full bg-[#f3f6f1] px-3 py-1.5 text-xs font-medium text-[#6d7d79]">
-                {currentMonthLabel} {month.split("-")[0]}
+                {displayDate(today)}
               </div>
             </div>
-            {recentQuery.isLoading ? (
+            {todayQuery.isLoading ? (
               <LoadingRows />
-            ) : recentQuery.data?.length ? (
-              <div className="overflow-x-auto">
+            ) : todayQuery.data?.length ? (
+              <div className="max-h-[430px] overflow-auto">
                 <table className="w-full min-w-[600px] text-left text-sm">
                   <thead>
-                    <tr className="border-b border-[#edf0ed] text-xs font-medium text-[#99a69f]">
+                    <tr className="sticky top-0 z-10 border-b border-[#edf0ed] bg-white text-xs font-medium text-[#99a69f]">
                       <th className="pb-3 font-medium">พนักงาน</th>
                       <th className="pb-3 font-medium">วันที่</th>
                       <th className="pb-3 font-medium">เข้า</th>
@@ -1073,7 +1038,7 @@ export default function Home() {
                     </tr>
                   </thead>
                   <tbody>
-                    {recentQuery.data.map(record => (
+                    {todayQuery.data.map(record => (
                       <tr
                         key={record.id}
                         className="border-b border-[#f1f3f0] last:border-0"
